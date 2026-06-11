@@ -1,0 +1,39 @@
+{
+    "DATASETS": {
+        "static": {
+            "path": "{DATA_PATH}/static",
+            "items": {
+                "grid": {
+                    "filename": "working_grid_3035_1km.tif"
+                },
+                "soil_1": {
+                    "filename": "ARPAV_soil_texture_usda.tif"
+                },
+                "soil_2": {
+                    "filename": "HWSD_Italy_USDA_texture_topsoil.tif"
+                },
+                "land_cover_1": {
+                    "filename": "CLC_EUCROP_mod.tif"
+                },
+                "land_cover_lookup_csv": {
+                    "filename": "CLC_EUCROP_mod_value_landcover_lookup_simple.csv"
+                }
+            }
+        },
+        "forcing": {
+            "path": "{DATA_PATH}/forcing",
+            "items": {}
+        },
+        "processed": {
+            "path": "{DATA_PATH}/processed",
+            "items": {
+                "soil_aligned": {
+                    "filename": "soil_texture_aligned.tif"
+                },
+                "land_cover_aligned": {
+                    "filename": "land_cover_aligned.tif"
+                }
+            }
+        }
+    }
+}

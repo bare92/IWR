@@ -1,0 +1,11 @@
+{
+    "TAGS": {
+        "Domain": "DAO",
+
+        "DATA_PATH"   : "/home/riccardo/Documents/07_Data/{Domain}",
+        "ARCHIVE_PATH": "/home/riccardo/Documents/08_Archive/{Domain}",
+        "VIZ_PATH"    : "/root/color_schemes",
+        "LOG_PATH"    : "/share/logs/{Domain}",
+        "THUMBS_PATH" : "/share/thumbnails/{Domain}"
+}
+}

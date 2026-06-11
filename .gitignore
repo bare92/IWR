@@ -1,0 +1,39 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest/cache/tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large/local data files
+*.mat
+data/
+
+# Environment/secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Build/package outputs
+build/
+dist/
+*.egg-info/
