@@ -156,6 +156,43 @@ def _run_workflow(process_steps: list[dict]) -> None:
         logger.info(f"=== Done : {step_name} ===\n")
 
 
+def _build_model(model_cfg: dict) -> None:
+    from iwr_processing.iwr_core_process import IWRModel
+
+    inputs = model_cfg.get("inputs", {}) if isinstance(model_cfg, dict) else {}
+    land_cover_path = inputs.get("land_cover_fractional")
+    soil_path = inputs.get("soil_type")
+
+    if not land_cover_path or not soil_path:
+        raise ValueError(
+            "MODEL.inputs must define both 'land_cover_fractional' and 'soil_type'."
+        )
+
+    time_range_cfg = model_cfg.get("time_range")
+    if isinstance(time_range_cfg, dict):
+        start = time_range_cfg.get("start")
+        end = time_range_cfg.get("end")
+        if start or end:
+            time_range = f"{start or ''}/{end or ''}"
+        else:
+            time_range = None
+    elif time_range_cfg is None:
+        time_range = None
+    else:
+        time_range = str(time_range_cfg)
+
+    logger.info("Building IWR model with static layers...")
+    model = IWRModel(
+        time_range=time_range,
+        land_cover_path=land_cover_path,
+        soil_path=soil_path,
+    )
+
+    debug_cfg = model_cfg.get("debug", {}) if isinstance(model_cfg, dict) else {}
+    if debug_cfg.get("print_summary", True):
+        logger.info("Model summary: %s", model.summary())
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -236,16 +273,22 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     process_steps: list = _resolve(config.get("PROCESS", []), final_context)
 
-    if not process_steps:
+    if process_steps:
+        logger.info(f"Running {len(process_steps)} process step(s).\n")
+
+        # ------------------------------------------------------------------ #
+        # 5. Execute preprocessing workflow
+        # ------------------------------------------------------------------ #
+        _run_workflow(process_steps)
+    else:
         logger.warning("No PROCESS steps found in the merged config.")
-        return
-
-    logger.info(f"Running {len(process_steps)} process step(s).\n")
 
     # ------------------------------------------------------------------ #
-    # 5. Execute
+    # 6. Optional model loading (for debugging static model inputs)
     # ------------------------------------------------------------------ #
-    _run_workflow(process_steps)
+    model_cfg = _resolve(config.get("MODEL", {}), final_context)
+    if model_cfg:
+        _build_model(model_cfg)
 
 
 if __name__ == "__main__":

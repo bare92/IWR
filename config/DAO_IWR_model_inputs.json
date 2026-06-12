@@ -1,0 +1,16 @@
+{
+    "MODEL": {
+        "name": "IWR_static_debug",
+        "time_range": {
+            "start": "{START_DATE}",
+            "end": "{END_DATE}"
+        },
+        "inputs": {
+            "land_cover_fractional": "{DATASETS.land_cover_aligned}",
+            "soil_type": "{DATASETS.soil_aligned}"
+        },
+        "debug": {
+            "print_summary": true
+        }
+    }
+}
