@@ -25,5 +25,18 @@
             "START_DATE": "2020-01-01",
             "END_DATE"  : "2020-12-31"
         }
+    },
+    "IWR_model_only_debug": {
+        "python"  : "/home/riccardo/Documents/04_Code/IWR/.venv/bin/python",
+        "program" : "/home/riccardo/Documents/04_Code/IWR/run_process.py",
+        "args"    : [
+            "/home/riccardo/Documents/04_Code/IWR/config/DAO_IWR_model_inputs.json"
+        ],
+        "env": {
+            "TAGS"      : "/home/riccardo/Documents/04_Code/IWR/config/DAO_IWR_tags.json",
+            "DATASETS"  : "/home/riccardo/Documents/04_Code/IWR/config/DAO_IWR_datasets.json",
+            "START_DATE": "2020-01-01",
+            "END_DATE"  : "2020-12-31"
+        }
     }
 }

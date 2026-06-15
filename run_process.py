@@ -273,6 +273,8 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     process_steps: list = _resolve(config.get("PROCESS", []), final_context)
 
+    model_cfg = _resolve(config.get("MODEL", {}), final_context)
+
     if process_steps:
         logger.info(f"Running {len(process_steps)} process step(s).\n")
 
@@ -281,12 +283,15 @@ def main() -> None:
         # ------------------------------------------------------------------ #
         _run_workflow(process_steps)
     else:
-        logger.warning("No PROCESS steps found in the merged config.")
+        if model_cfg:
+            logger.info("No PROCESS steps found. Running MODEL only.")
+        else:
+            logger.warning("No PROCESS steps found in the merged config.")
+            return
 
     # ------------------------------------------------------------------ #
     # 6. Optional model loading (for debugging static model inputs)
     # ------------------------------------------------------------------ #
-    model_cfg = _resolve(config.get("MODEL", {}), final_context)
     if model_cfg:
         _build_model(model_cfg)
 
