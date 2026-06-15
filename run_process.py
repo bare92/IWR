@@ -61,6 +61,8 @@ def _resolve_str(value: str, context: dict, *, max_passes: int = 10) -> str:
             for part in path:
                 if isinstance(obj, dict) and part in obj:
                     obj = obj[part]
+                elif obj is context and len(path) == 1 and part in os.environ:
+                    obj = os.environ[part]
                 else:
                     return match.group(0)  # leave unresolved
             return str(obj) if not isinstance(obj, (dict, list)) else match.group(0)
@@ -162,6 +164,7 @@ def _build_model(model_cfg: dict) -> None:
     inputs = model_cfg.get("inputs", {}) if isinstance(model_cfg, dict) else {}
     land_cover_path = inputs.get("land_cover_fractional")
     soil_path = inputs.get("soil_type")
+    crop_parameter_csv = inputs.get("crop_parameter_csv")
 
     if not land_cover_path or not soil_path:
         raise ValueError(
@@ -186,6 +189,7 @@ def _build_model(model_cfg: dict) -> None:
         time_range=time_range,
         land_cover_path=land_cover_path,
         soil_path=soil_path,
+        crop_parameter_csv=crop_parameter_csv,
     )
 
     debug_cfg = model_cfg.get("debug", {}) if isinstance(model_cfg, dict) else {}
