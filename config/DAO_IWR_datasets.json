@@ -17,12 +17,55 @@
                 },
                 "land_cover_lookup_csv": {
                     "filename": "CLC_EUCROP_mod_value_landcover_lookup_simple.csv"
+                },
+                "irrigated_areas_mask": {
+                    "filename": "distretti_irrigui_SIGRIAN_3035_1km_mask.tif"
                 }
             }
         },
         "forcing": {
             "path": "{DATA_PATH}/forcing",
-            "items": {}
+            "description": "Monthly NetCDF files with daily time steps. DAO micromet outputs.",
+            "temporal_frequency": "monthly",
+            "time_step": "daily",
+            "coordinate_system": "EPSG:3035",
+            "items": {
+                "et0": {
+                    "folder": "ET_HS",
+                    "file_pattern": "potential_evapotranspiration_{year}_{month:02d}.nc",
+                    "variable_name": "PET",
+                    "units": "mm day-1",
+                    "description": "Potential evapotranspiration (Hargreaves-Samani method)"
+                },
+                "precipitation": {
+                    "folder": "P",
+                    "file_pattern": "precipitation_{year}_{month:02d}.nc",
+                    "variable_name": null,
+                    "units": "mm day-1",
+                    "description": "Daily precipitation"
+                },
+                "temperature": {
+                    "folder": "Temperature",
+                    "file_pattern": "temperature_{year}_{month:02d}.nc",
+                    "variable_name": null,
+                    "units": "°C",
+                    "description": "Mean daily temperature"
+                },
+                "temperature_min": {
+                    "folder": "Temperature_min",
+                    "file_pattern": "temperature_min_{year}_{month:02d}.nc",
+                    "variable_name": null,
+                    "units": "°C",
+                    "description": "Minimum daily temperature"
+                },
+                "temperature_max": {
+                    "folder": "Temperature_max",
+                    "file_pattern": "temperature_max_{year}_{month:02d}.nc",
+                    "variable_name": null,
+                    "units": "°C",
+                    "description": "Maximum daily temperature"
+                }
+            }
         },
         "processed": {
             "path": "{DATA_PATH}/processed",
@@ -32,6 +75,9 @@
                 },
                 "land_cover_aligned": {
                     "filename": "land_cover_aligned.tif"
+                },
+                "irrigated_areas_mask_aligned": {
+                    "filename": "distretti_irrigui_SIGRIAN_3035_1km_mask_aligned.tif"
                 }
             }
         }

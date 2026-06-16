@@ -9,8 +9,29 @@ import logging
 import os
 import tempfile
 import csv
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_crop_token(value: str) -> str:
+    token = str(value).strip().lower()
+    token = token.replace("-", "_").replace("/", "_")
+    token = re.sub(r"\s+", "_", token)
+    token = re.sub(r"_+", "_", token)
+    return token.strip("_")
+
+
+def _parse_first_float(value: object) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    match = re.search(r"[-+]?\d*\.?\d+", text)
+    if match is None:
+        return None
+    return float(match.group(0))
 
 
 def _as_class_list(classes: list[str | int] | str | None) -> list[str | int]:
@@ -243,6 +264,12 @@ def aggregate_fractional_layers(
     from rasterio.enums import Resampling
     from rasterio.warp import reproject
 
+    def _normalize_band_description(label: str) -> str:
+        normalized = str(label).strip().lower()
+        normalized = normalized.replace("/", "_").replace("-", "_")
+        normalized = "_".join(part for part in normalized.split() if part)
+        return normalized
+
     source_path = land_cover or input or (inputs[0] if inputs else None)
     if source_path is None:
         raise ValueError(
@@ -261,10 +288,13 @@ def aggregate_fractional_layers(
     class_labels: list[str] = []
     if class_values_list:
         reverse_map = {v: k for k, v in class_map.items()} if class_map else {}
-        for c in class_values_list:
+        for idx, c in enumerate(class_values_list):
             code = int(float(c))
             class_codes.append(code)
-            class_labels.append(reverse_map.get(code, str(code)))
+            if class_name_list and idx < len(class_name_list):
+                class_labels.append(str(class_name_list[idx]))
+            else:
+                class_labels.append(reverse_map.get(code, str(code)))
     else:
         if not class_map_csv:
             raise ValueError("'classes' requires 'class_map_csv' to resolve names.")
@@ -326,7 +356,12 @@ def aggregate_fractional_layers(
                     (class_fraction / valid_fraction) * 100.0,
                     output_nodata,
                 )
-            out_stack[idx, :, :] = np.clip(percent, 0.0, 100.0)
+            clipped = np.where(
+                valid_fraction > 0,
+                np.clip(percent, 0.0, 100.0),
+                output_nodata,
+            )
+            out_stack[idx, :, :] = clipped.astype(np.float32)
 
         out_path = output or tempfile.NamedTemporaryFile(
             suffix=".tif", prefix="iwr_fractional_", delete=False
@@ -350,7 +385,7 @@ def aggregate_fractional_layers(
         with rasterio.open(out_path, "w", **profile) as dst:
             dst.write(out_stack)
             for bidx, label in enumerate(class_labels, start=1):
-                dst.set_band_description(bidx, f"frac_{label}")
+                dst.set_band_description(bidx, f"frac_{_normalize_band_description(label)}")
 
     logger.info(
         "Fractional layers written: %s (bands=%d)", out_path, len(class_codes)
@@ -467,3 +502,177 @@ def apply_raster_mask(
     if len(out_paths) == 1:
         return out_paths[0]
     return out_paths
+
+
+def build_crop_calendar_template_from_raster(
+    land_cover_raster: str,
+    fao56_kc_csv: str,
+    output: str | None = None,
+    class_map_csv: str | None = None,
+    min_fraction_threshold: float = 0.0,
+    kc_off_season: float = 0.5,
+    **kwargs,
+) -> str:
+    """Build a crop-calendar template CSV from crop raster coverage.
+
+    The output template intentionally has no ``year`` column and leaves
+    ``planting_doy`` / ``harvest_doy`` empty for manual completion.
+
+    Input raster can be either:
+    - multiband fractional raster with crop band descriptions (preferred), or
+    - single-band categorical raster using ``class_map_csv`` to map values to crop IDs.
+    """
+    import numpy as np
+    import pandas as pd
+    import rasterio
+
+    if output is None:
+        raise ValueError("'output' path is required.")
+    if not os.path.exists(land_cover_raster):
+        raise FileNotFoundError(f"Land-cover raster not found: {land_cover_raster}")
+    if not os.path.exists(fao56_kc_csv):
+        raise FileNotFoundError(f"FAO56 KC CSV not found: {fao56_kc_csv}")
+
+    class_name_by_code: dict[int, str] = {}
+    if class_map_csv:
+        with open(class_map_csv, "r", encoding="utf-8") as fp:
+            reader = csv.DictReader(fp)
+            headers = [h or "" for h in (reader.fieldnames or [])]
+            lower = {h.lower(): h for h in headers}
+
+            value_col = (
+                lower.get("value")
+                or lower.get("code")
+                or lower.get("id")
+                or lower.get("class_value")
+                or lower.get("raster_value")
+            )
+            label_col = (
+                lower.get("crop_id")
+                or lower.get("land_cover")
+                or lower.get("label")
+                or lower.get("name")
+                or lower.get("class_name")
+                or lower.get("land_cover_name")
+            )
+
+            if not value_col or not label_col:
+                raise ValueError(
+                    "class_map_csv must contain value/code and crop/name columns"
+                )
+
+            for row in reader:
+                raw_value = str(row[value_col]).strip()
+                raw_label = str(row[label_col]).strip()
+                if not raw_value or not raw_label:
+                    continue
+                class_name_by_code[int(float(raw_value))] = raw_label
+
+    used_crop_tokens: list[str] = []
+    with rasterio.open(land_cover_raster) as src:
+        # Multiband fractional raster: use band descriptions and keep bands with > threshold.
+        if src.count > 1:
+            nodata = src.nodata
+            for band_idx in range(1, src.count + 1):
+                arr = src.read(band_idx).astype(np.float32)
+                if nodata is not None:
+                    arr = np.where(np.isclose(arr, nodata), np.nan, arr)
+                max_val = np.nanmax(arr) if arr.size else np.nan
+                if np.isnan(max_val) or max_val <= float(min_fraction_threshold):
+                    continue
+
+                desc = src.descriptions[band_idx - 1] or f"band_{band_idx}"
+                token = _normalize_crop_token(desc)
+                if token.startswith("frac_"):
+                    token = token[5:]
+                used_crop_tokens.append(token)
+        else:
+            # Single-band categorical raster: use mapped class names if available.
+            arr = src.read(1)
+            nodata = src.nodata
+            if nodata is None:
+                unique_codes = np.unique(arr)
+            else:
+                unique_codes = np.unique(arr[~np.isclose(arr, nodata)])
+
+            for code in unique_codes:
+                int_code = int(float(code))
+                label = class_name_by_code.get(int_code, str(int_code))
+                used_crop_tokens.append(_normalize_crop_token(label))
+
+    used_crop_tokens = sorted(set(token for token in used_crop_tokens if token))
+    if not used_crop_tokens:
+        raise ValueError("No crop classes detected in input raster.")
+
+    fao_df = pd.read_csv(fao56_kc_csv)
+    required_cols = {"crop_id", "crop_name_fao56", "kc_ini", "kc_mid", "kc_end"}
+    missing_cols = required_cols - set(fao_df.columns)
+    if missing_cols:
+        raise ValueError(
+            f"FAO56 KC CSV is missing required columns: {sorted(missing_cols)}"
+        )
+
+    fao_df["crop_id_norm"] = fao_df["crop_id"].map(_normalize_crop_token)
+    fao_df["crop_name_norm"] = fao_df["crop_name_fao56"].map(_normalize_crop_token)
+
+    aliases = {
+        "wheat": "winter_wheat",
+        "maize": "maize_field_grain_field_corn",
+        "corn": "maize_field_grain_field_corn",
+    }
+
+    out_rows: list[dict[str, object]] = []
+    for token in used_crop_tokens:
+        token_resolved = aliases.get(token, token)
+
+        row = fao_df.loc[fao_df["crop_id_norm"] == token_resolved]
+        if row.empty:
+            row = fao_df.loc[fao_df["crop_name_norm"] == token_resolved]
+        if row.empty:
+            # Fallback: substring match to help with close naming variants.
+            row = fao_df.loc[
+                fao_df["crop_id_norm"].str.contains(token_resolved, regex=False)
+                | fao_df["crop_name_norm"].str.contains(token_resolved, regex=False)
+            ]
+
+        if row.empty:
+            logger.warning("No FAO56 KC match for crop token '%s'", token)
+            crop_id = token
+            kc_ini = ""
+            kc_mid = ""
+            kc_end = ""
+        else:
+            chosen = row.iloc[0]
+            crop_id = str(chosen["crop_id"])
+            kc_ini_val = _parse_first_float(chosen.get("kc_ini"))
+            kc_mid_val = _parse_first_float(chosen.get("kc_mid"))
+            kc_end_val = _parse_first_float(chosen.get("kc_end"))
+            kc_ini = "" if kc_ini_val is None else round(kc_ini_val, 3)
+            kc_mid = "" if kc_mid_val is None else round(kc_mid_val, 3)
+            kc_end = "" if kc_end_val is None else round(kc_end_val, 3)
+
+        out_rows.append(
+            {
+                "crop_id": crop_id,
+                "planting_doy": "",
+                "harvest_doy": "",
+                "kc_ini": kc_ini,
+                "kc_mid": kc_mid,
+                "kc_end": kc_end,
+                "growth_stage_days_initial": "",
+                "growth_stage_days_development": "",
+                "growth_stage_days_mid_season": "",
+                "growth_stage_days_late_season": "",
+                "kc_off_season": kc_off_season,
+            }
+        )
+
+    output_df = pd.DataFrame(out_rows)
+    output_df = output_df.sort_values("crop_id").reset_index(drop=True)
+    os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+    output_df.to_csv(output, index=False)
+
+    logger.info(
+        "Crop calendar template written: %s (crops=%d)", output, len(output_df)
+    )
+    return output

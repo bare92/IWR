@@ -4,10 +4,8 @@ import argparse
 import logging
 import sys
 import json
+from datetime import date
 from typing import Any
-
-TAGS_JSON = os.getenv("TAGS")
-DS_JSON   = os.getenv("DATASETS")
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -107,7 +105,8 @@ def _flatten_datasets(datasets: dict) -> dict:
         base = cat_data.get("path", "")
         for name, item in cat_data.get("items", {}).items():
             filename = item.get("filename", "")
-            flat[name] = os.path.join(base, filename) if base and filename else filename
+            if filename:
+                flat[name] = os.path.join(base, filename) if base else filename
     return flat
 
 
@@ -160,15 +159,64 @@ def _run_workflow(process_steps: list[dict]) -> None:
 
 def _build_model(model_cfg: dict) -> None:
     from iwr_processing.iwr_core_process import IWRModel
+    from iwr_processing.crop_calendar import load_crop_calendars_from_csv
+    from iwr_processing.monthly_iwr_runner import MonthlyIWRRunner
+    from iwr_processing.netcdf_forcing_reader import (
+        MonthlyNetCDFForcingReader,
+        MonthlyNetCDFVariableSpec,
+    )
 
-    inputs = model_cfg.get("inputs", {}) if isinstance(model_cfg, dict) else {}
+    def _parse_iso_date(value: str | None, label: str) -> date:
+        if not value:
+            raise ValueError(f"MODEL.time_range.{label} is required for monthly runner.")
+        return date.fromisoformat(str(value))
+
+    def _resolve_crop_calendar(
+        calendars_by_key: dict[tuple[str, int], Any],
+        crop_name: str,
+        target_year: int,
+    ) -> Any:
+        direct = calendars_by_key.get((crop_name, target_year))
+        if direct is not None:
+            return direct
+
+        same_crop = [cal for (cid, _), cal in calendars_by_key.items() if cid == crop_name]
+        if same_crop:
+            same_crop.sort(key=lambda cal: abs(cal.year - target_year))
+            return same_crop[0]
+
+        available = sorted({cid for (cid, _) in calendars_by_key.keys()})
+        raise KeyError(
+            f"No crop calendar found for crop '{crop_name}'. Available crop_ids: {available}"
+        )
+
+    inputs = (
+        model_cfg.get("static_inputs")
+        or model_cfg.get("inputs")
+        or {}
+    ) if isinstance(model_cfg, dict) else {}
     land_cover_path = inputs.get("land_cover_fractional")
     soil_path = inputs.get("soil_type")
-    crop_parameter_csv = inputs.get("crop_parameter_csv")
+    crop_parameter_csv = (
+        inputs.get("crop_parameter_csv")
+        or model_cfg.get("crop_parameter_csv")
+        or None
+    )
+    initial_saturation = inputs.get("initial_saturation")
+    initial_condition = inputs.get("initial_condition", "watneeds_half_taw")
+
+    processing_cfg = model_cfg.get("processing", {}) if isinstance(model_cfg, dict) else {}
+    peff_reduction_pct = processing_cfg.get("peff_reduction_pct", inputs.get("peff_reduction_pct", 5.0))
+
+    soil_parameters = model_cfg.get("soil_parameters", {}) if isinstance(model_cfg, dict) else {}
+    taw_layer = soil_parameters.get("taw_layer")
+    smax_layer = soil_parameters.get("smax_layer")
+    fmax_layer = soil_parameters.get("fmax_layer")
 
     if not land_cover_path or not soil_path:
         raise ValueError(
-            "MODEL.inputs must define both 'land_cover_fractional' and 'soil_type'."
+            "MODEL.static_inputs (or MODEL.inputs) must define both "
+            "'land_cover_fractional' and 'soil_type'."
         )
 
     time_range_cfg = model_cfg.get("time_range")
@@ -190,11 +238,97 @@ def _build_model(model_cfg: dict) -> None:
         land_cover_path=land_cover_path,
         soil_path=soil_path,
         crop_parameter_csv=crop_parameter_csv,
+        initial_condition=initial_condition,
+        initial_saturation=initial_saturation,
+        peff_reduction_pct=peff_reduction_pct,
+        taw_layer=taw_layer,
+        smax_layer=smax_layer,
+        fmax_layer=fmax_layer,
     )
 
     debug_cfg = model_cfg.get("debug", {}) if isinstance(model_cfg, dict) else {}
     if debug_cfg.get("print_summary", True):
         logger.info("Model summary: %s", model.summary())
+
+    runner_cfg = model_cfg.get("runner", {}) if isinstance(model_cfg, dict) else {}
+    if runner_cfg.get("type") != "monthly_iwr_runner":
+        return
+
+    logger.info("Runner type is monthly_iwr_runner. Starting streamed simulation...")
+
+    if not isinstance(time_range_cfg, dict):
+        raise ValueError("MODEL.time_range must be an object with 'start' and 'end' for monthly runner.")
+
+    start_date = _parse_iso_date(time_range_cfg.get("start"), "start")
+    end_date = _parse_iso_date(time_range_cfg.get("end"), "end")
+
+    forcing_cfg = model_cfg.get("forcing", {}) if isinstance(model_cfg, dict) else {}
+    root_dir = forcing_cfg.get("root_dir")
+    if not root_dir:
+        raise ValueError("MODEL.forcing.root_dir is required for monthly runner.")
+
+    variable_cfg = forcing_cfg.get("variables", {})
+    if variable_cfg:
+        variable_specs: dict[str, MonthlyNetCDFVariableSpec] = {}
+        for var_name, spec in variable_cfg.items():
+            variable_specs[var_name] = MonthlyNetCDFVariableSpec(
+                name=var_name,
+                folder=spec.get("folder", var_name),
+                file_pattern=spec.get("file_pattern", "{variable}_{year}_{month:02d}.nc"),
+                variable_name=spec.get("variable_name"),
+                units=spec.get("units"),
+            )
+        forcing_reader = MonthlyNetCDFForcingReader(
+            root_dir=root_dir,
+            variable_specs=variable_specs,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    else:
+        forcing_reader = MonthlyNetCDFForcingReader.from_dao_layout(
+            root_dir=root_dir,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    crop_calendars_cfg = model_cfg.get("crop_calendars", {}) if isinstance(model_cfg, dict) else {}
+    crop_calendar_path = crop_calendars_cfg.get("csv_path")
+    if not crop_calendar_path:
+        raise ValueError(
+            "MODEL.crop_calendars.csv_path is required for monthly_iwr_runner."
+        )
+
+    simulation_years = list(range(start_date.year, end_date.year + 1))
+    calendars_by_key = load_crop_calendars_from_csv(
+        crop_calendar_path,
+        years=simulation_years,
+    )
+    crop_name = runner_cfg.get("crop_name")
+    if not crop_name:
+        raise ValueError("MODEL.runner.crop_name is required for monthly_iwr_runner.")
+    crop_calendar = _resolve_crop_calendar(calendars_by_key, crop_name, start_date.year)
+
+    output_dir = runner_cfg.get("output_dir")
+    if not output_dir:
+        raise ValueError("MODEL.runner.output_dir is required for monthly_iwr_runner.")
+
+    monthly_runner = MonthlyIWRRunner(
+        model=model,
+        forcing_reader=forcing_reader,
+        crop_calendar=crop_calendar,
+        crop_name=crop_name,
+        output_dir=output_dir,
+        irrigated_mask=inputs.get("irrigated_mask"),
+        use_direct_etc=bool(runner_cfg.get("use_direct_etc", False)),
+        write_monthly_outputs=bool(runner_cfg.get("write_monthly_outputs", True)),
+    )
+
+    result = monthly_runner.run()
+    logger.info(
+        "Monthly runner complete. Files written: %d. Final soil storage shape: %s",
+        len(result.written_files),
+        result.final_soil_storage_mm.shape,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -226,11 +360,14 @@ def main() -> None:
         else:
             logger.warning(f"Ignoring unrecognised argument: {token}")
 
-    # Append paths provided via environment variables
-    if TAGS_JSON:
-        json_files.append(TAGS_JSON)
-    if DS_JSON:
-        json_files.append(DS_JSON)
+    # Append paths provided via environment variables.
+    # Read them here so KEY=VALUE CLI overrides are honored.
+    tags_json = os.getenv("TAGS")
+    datasets_json = os.getenv("DATASETS")
+    if tags_json:
+        json_files.append(tags_json)
+    if datasets_json:
+        json_files.append(datasets_json)
 
     valid_files = [f for f in json_files if os.path.exists(f)]
     for f in set(json_files) - set(valid_files):
@@ -256,6 +393,8 @@ def main() -> None:
 
     # Merge resolved tags into a working context
     context: dict = {**config, **resolved_tags}
+    if "PROCESSED_DIR" not in context and "DATA_PATH" in resolved_tags:
+        context["PROCESSED_DIR"] = os.path.join(resolved_tags["DATA_PATH"], "processed")
 
     # Resolve DATASETS category paths
     datasets_resolved: dict = _resolve(config.get("DATASETS", {}), context)
@@ -270,7 +409,9 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # 3. Build final context used for process-step resolution
     # ------------------------------------------------------------------ #
-    final_context: dict = {**context, "DATASETS": ds_flat}
+    datasets_context = dict(datasets_resolved)
+    datasets_context.update(ds_flat)
+    final_context: dict = {**context, "DATASETS": datasets_context}
 
     # ------------------------------------------------------------------ #
     # 4. Resolve PROCESS steps
@@ -302,4 +443,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    os._exit(0)
+    # Avoid forced interpreter exit under debugpy (can surface as non-zero exit codes).
+    if sys.gettrace() is None:
+        os._exit(0)

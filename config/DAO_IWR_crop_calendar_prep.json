@@ -1,0 +1,21 @@
+{
+    "WORKFLOW": {
+        "PROCESS": [
+            {
+                "name": "build_crop_calendar_template",
+                "input": "{DATASETS.land_cover_aligned}",
+                "output": "{DATA_PATH}/processed/crop_calendar_auto.csv",
+                "process_list": [
+                    {
+                        "function": "build_crop_calendar_template_from_raster",
+                        "land_cover_raster": "{DATASETS.land_cover_aligned}",
+                        "fao56_kc_csv": "aux_material/fao56_crop_parameters_table22_kc.csv",
+                        "class_map_csv": "{DATASETS.land_cover_lookup_csv}",
+                        "min_fraction_threshold": 0.0,
+                        "kc_off_season": 0.5
+                    }
+                ]
+            }
+        ]
+    }
+}

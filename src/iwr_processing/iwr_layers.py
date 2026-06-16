@@ -401,6 +401,8 @@ class SoilLayer:
     transform: Affine
     crs: CRS | None
     path: str
+    taw_mm: np.ndarray | None = None  # shape: (rows, cols), mm; WATNEEDS direct input
+    smax_mm: np.ndarray | None = None  # shape: (rows, cols), mm; max soil storage
 
     @classmethod
     def from_geotiff(
@@ -408,10 +410,16 @@ class SoilLayer:
         geotiff_path: str,
         field_capacity: np.ndarray | None = None,
         wilting_point: np.ndarray | None = None,
+        taw_mm: np.ndarray | str | None = None,
+        smax_mm: np.ndarray | str | None = None,
         om_override: float | None = None,
         output_nodata: float = -9999.0,
     ) -> "SoilLayer":
-        """Load soil classes and derive FC/WP if they are not provided."""
+        """Load soil classes and derive FC/WP if they are not provided.
+        
+        If taw_mm or smax_mm are provided as raster paths (str), they are loaded.
+        Otherwise, FC/WP are derived from USDA texture via pedotransfer (default).
+        """
         p = Path(geotiff_path)
         if not p.exists():
             raise FileNotFoundError(f"GeoTIFF not found: {geotiff_path}")
@@ -455,6 +463,44 @@ class SoilLayer:
         if fc_arr.shape != arr.shape or wp_arr.shape != arr.shape:
             raise ValueError("field_capacity and wilting_point must match soil raster shape")
 
+        # Load optional WATNEEDS-direct inputs
+        taw_mm_arr = None
+        smax_mm_arr = None
+        
+        if taw_mm is not None:
+            if isinstance(taw_mm, str):
+                with rasterio.open(taw_mm) as src:
+                    taw_mm_arr = src.read(1).astype(np.float32)
+                    if taw_mm_arr.shape != arr.shape:
+                        raise ValueError(
+                            f"taw_mm raster shape {taw_mm_arr.shape} does not match "
+                            f"soil raster shape {arr.shape}"
+                        )
+            else:
+                taw_mm_arr = np.asarray(taw_mm, dtype=np.float32)
+                if taw_mm_arr.shape != arr.shape:
+                    raise ValueError(
+                        f"taw_mm array shape {taw_mm_arr.shape} does not match "
+                        f"soil raster shape {arr.shape}"
+                    )
+        
+        if smax_mm is not None:
+            if isinstance(smax_mm, str):
+                with rasterio.open(smax_mm) as src:
+                    smax_mm_arr = src.read(1).astype(np.float32)
+                    if smax_mm_arr.shape != arr.shape:
+                        raise ValueError(
+                            f"smax_mm raster shape {smax_mm_arr.shape} does not match "
+                            f"soil raster shape {arr.shape}"
+                        )
+            else:
+                smax_mm_arr = np.asarray(smax_mm, dtype=np.float32)
+                if smax_mm_arr.shape != arr.shape:
+                    raise ValueError(
+                        f"smax_mm array shape {smax_mm_arr.shape} does not match "
+                        f"soil raster shape {arr.shape}"
+                    )
+        
         return cls(
             soil_type=arr,
             field_capacity=fc_arr,
@@ -464,6 +510,8 @@ class SoilLayer:
             transform=transform,
             crs=crs,
             path=str(p),
+            taw_mm=taw_mm_arr,
+            smax_mm=smax_mm_arr,
         )
 
     def hydraulic_mask(self) -> np.ndarray:

@@ -40,6 +40,19 @@
                         "mask": "{DATASETS.grid}"
                     }
                 ]
+            },
+            {
+                "name": "align_irrigation_mask",
+                "input": "{DATASETS.irrigated_areas_mask}",
+                "output": "{DATASETS.irrigated_areas_mask_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.irrigated_areas_mask}"],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "nearest"
+                    }
+                ]
             }
         ]
     }

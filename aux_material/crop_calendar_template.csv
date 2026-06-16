@@ -1,0 +1,5 @@
+crop_id,planting_doy,harvest_doy,kc_ini,kc_mid,kc_end,growth_stage_days_initial,growth_stage_days_development,growth_stage_days_mid_season,growth_stage_days_late_season,kc_off_season
+wheat,60,180,0.3,1.15,0.25,20,50,80,30,0.5
+wheat,60,180,0.3,1.15,0.25,20,50,80,30,0.5
+maize,100,260,0.3,1.2,0.35,25,50,80,30,0.5
+maize,100,260,0.3,1.2,0.35,25,50,80,30,0.5
