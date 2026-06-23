@@ -1,0 +1,176 @@
+{
+    "WORKFLOW": {
+        "PROCESS": [
+            {
+                "name": "merge_soil_datasets",
+                "input": "{DATASETS.soil_1}",
+                "output": "{DATASETS.soil_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.soil_1}", "{DATASETS.soil_2}"],
+                        "nodata_values": [255, 255],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "Mode"
+                    },
+                    {
+                        "function": "merge_rasters",
+                        "output_nodata": 255
+                    },
+                    {
+                        "function": "apply_raster_mask",
+                        "mask": "{DATASETS.grid}"
+                    }
+                ]
+            },
+            {
+                "name": "aggregate_land_cover_fractions",
+                "input": "{DATASETS.land_cover_1}",
+                "output": "{DATASETS.land_cover_aligned}",
+                "process_list": [
+                    {
+                        "function": "aggregate_fractional_layers",
+                        "land_cover": "{DATASETS.land_cover_1}",
+                        "grid": "{DATASETS.grid}",
+                        "class_map_csv": "{DATASETS.land_cover_lookup_csv}",
+                        "class_values": [213, 221, 222, 1211, 1212, 1213, 1215, 1216, 1217, 1218, 1219]
+                    },
+                    {
+                        "function": "apply_raster_mask",
+                        "mask": "{DATASETS.grid}"
+                    }
+                ]
+            },
+            {
+                "name": "align_irrigation_mask",
+                "input": "{DATASETS.irrigated_areas_mask}",
+                "output": "{DATASETS.irrigated_areas_mask_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.irrigated_areas_mask}"],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "nearest"
+                    }
+                ]
+            },
+            {
+                "name": "align_phenoe1_mask",
+                "input": "{DATASETS.phenoe1}",
+                "output": "{DATASETS.phenoe1_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.phenoe1}"],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "nearest"
+                    }
+                ]
+            },
+            {
+                "name": "align_phenoe2_mask",
+                "input": "{DATASETS.phenoe2}",
+                "output": "{DATASETS.phenoe2_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.phenoe2}"],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "nearest"
+                    }
+                ]
+            },
+            {
+                "name": "align_phenom1_mask",
+                "input": "{DATASETS.phenom1}",
+                "output": "{DATASETS.phenom1_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.phenom1}"],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "nearest"
+                    }
+                ]
+            },
+            {
+                "name": "align_phenom2_mask",
+                "input": "{DATASETS.phenom2}",
+                "output": "{DATASETS.phenom2_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.phenom2}"],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "nearest"
+                    }
+                ]
+            },
+            {
+                "name": "align_phenos1_mask",
+                "input": "{DATASETS.phenos1}",
+                "output": "{DATASETS.phenos1_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.phenos1}"],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "nearest"
+                    }
+                ]
+            },
+            {
+                "name": "align_phenos2_mask",
+                "input": "{DATASETS.phenos2}",
+                "output": "{DATASETS.phenos2_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.phenos2}"],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "nearest"
+                    }
+                ]
+            },
+            {
+                "name": "align_phenosen1_mask",
+                "input": "{DATASETS.phenosen1}",
+                "output": "{DATASETS.phenosen1_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.phenosen1}"],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "nearest"
+                    }
+                ]
+            },
+            {
+                "name": "align_phenosen2_mask",
+                "input": "{DATASETS.phenosen2}",
+                "output": "{DATASETS.phenosen2_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.phenosen2}"],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "nearest"
+                    }
+                ]
+            },
+            {
+                "name": "align_phenonseasons_mask",
+                "input": "{DATASETS.phenonseasons}",
+                "output": "{DATASETS.phenonseasons_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.phenonseasons}"],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "nearest"
+                    }
+                ]
+            }
+        ]
+    }
+}

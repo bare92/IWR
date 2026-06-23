@@ -96,6 +96,7 @@ def _flatten_datasets(datasets: dict) -> dict:
             path: <base_path>
             items:
               <name>:
+                folder: <optional_folder>
                 filename: <filename>
     """
     flat: dict[str, str] = {}
@@ -104,9 +105,11 @@ def _flatten_datasets(datasets: dict) -> dict:
             continue
         base = cat_data.get("path", "")
         for name, item in cat_data.get("items", {}).items():
+            folder = item.get("folder", "")
             filename = item.get("filename", "")
             if filename:
-                flat[name] = os.path.join(base, filename) if base else filename
+                parts = [part for part in (base, folder, filename) if part]
+                flat[name] = os.path.join(*parts) if parts else filename
     return flat
 
 
@@ -165,6 +168,7 @@ def _build_model(model_cfg: dict) -> None:
         MonthlyNetCDFForcingReader,
         MonthlyNetCDFVariableSpec,
     )
+    import rasterio
 
     def _parse_iso_date(value: str | None, label: str) -> date:
         if not value:
@@ -312,6 +316,50 @@ def _build_model(model_cfg: dict) -> None:
     if not output_dir:
         raise ValueError("MODEL.runner.output_dir is required for monthly_iwr_runner.")
 
+    use_phenology_kc = bool(runner_cfg.get("use_phenology_kc", False))
+    phenology_nodata_value = runner_cfg.get("phenology_nodata_value")
+    skip_iwr_when_inactive = bool(runner_cfg.get("skip_iwr_when_inactive", False))
+
+    phenology_layers: dict[str, Any] | None = None
+    if use_phenology_kc:
+        expected_shape = model.soil.field_capacity.shape
+
+        def _load_phenology_layer(key: str) -> Any:
+            path = inputs.get(key)
+            if not path:
+                raise ValueError(
+                    f"MODEL.runner.use_phenology_kc=True requires MODEL.static_inputs.{key}."
+                )
+
+            with rasterio.open(path) as src:
+                arr = src.read(1).astype("float32")
+                if arr.shape != expected_shape:
+                    raise ValueError(
+                        f"Phenology layer '{key}' shape {arr.shape} does not match model grid {expected_shape}."
+                    )
+                nonlocal phenology_nodata_value
+                if phenology_nodata_value is None and src.nodata is not None:
+                    phenology_nodata_value = src.nodata
+            return arr
+
+        phenology_layers = {
+            "phenoe1": _load_phenology_layer("phenoe1"),
+            "phenom1": _load_phenology_layer("phenom1"),
+            "phenos1": _load_phenology_layer("phenos1"),
+            "phenosen1": _load_phenology_layer("phenosen1"),
+        }
+
+        season2_keys = ("phenoe2", "phenom2", "phenos2", "phenosen2")
+        present_s2 = [k for k in season2_keys if inputs.get(k)]
+        if present_s2 and len(present_s2) != len(season2_keys):
+            raise ValueError(
+                "If any season-2 phenology layer is provided, all must be provided: "
+                f"{season2_keys}. Present: {present_s2}"
+            )
+        if len(present_s2) == len(season2_keys):
+            for key in season2_keys:
+                phenology_layers[key] = _load_phenology_layer(key)
+
     monthly_runner = MonthlyIWRRunner(
         model=model,
         forcing_reader=forcing_reader,
@@ -321,6 +369,10 @@ def _build_model(model_cfg: dict) -> None:
         irrigated_mask=inputs.get("irrigated_mask"),
         use_direct_etc=bool(runner_cfg.get("use_direct_etc", False)),
         write_monthly_outputs=bool(runner_cfg.get("write_monthly_outputs", True)),
+        phenology_layers=phenology_layers,
+        phenology_nodata_value=phenology_nodata_value,
+        use_phenology_kc=use_phenology_kc,
+        skip_iwr_when_inactive=skip_iwr_when_inactive,
     )
 
     result = monthly_runner.run()

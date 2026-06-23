@@ -1,0 +1,9 @@
+asap0_id: country id used to uniquely identify the unit in ASAP
+name0_shr: short name of the country (max 16 characters)
+asap1_id: sub-national unit id used to uniquely identify the unit in ASAP
+name1_shr: short name of the sub-national unit (max 16 characters)
+crop_name: name of the crop
+sos_s: start of the season - start (start of planting)
+sos_e: start of the season - end (end of planting, start of growth)
+eos_s: end of the season - start (end of growth, start of harvest)
+eos_e: end of the season - end (end of harvest)

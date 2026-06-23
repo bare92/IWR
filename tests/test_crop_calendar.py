@@ -35,14 +35,24 @@ def build_calendar() -> CropCalendar:
     )
 
 
-def test_compute_kc_daily_interpolates_stages():
+def test_compute_kc_daily_static_phases():
+    """Test that Kc returns static values based on crop phase (no interpolation)."""
     calendar = build_calendar()
+    # Off-season
     assert compute_kc_daily(calendar, 99, 2020) == pytest.approx(0.5)
+    # Initial phase (days 0-1, DOY 100-101) -> Kc_ini
     assert compute_kc_daily(calendar, 100, 2020) == pytest.approx(0.4)
     assert compute_kc_daily(calendar, 101, 2020) == pytest.approx(0.4)
-    assert compute_kc_daily(calendar, 103, 2020) == pytest.approx(0.8)
-    assert compute_kc_daily(calendar, 104, 2020) == pytest.approx(1.2)
-    assert compute_kc_daily(calendar, 108, 2020) == pytest.approx(1.2)
+    # Development phase (days 2-4, DOY 102-104) -> Kc_ini (static)
+    assert compute_kc_daily(calendar, 102, 2020) == pytest.approx(0.4)
+    assert compute_kc_daily(calendar, 103, 2020) == pytest.approx(0.4)
+    assert compute_kc_daily(calendar, 104, 2020) == pytest.approx(0.4)
+    # Mid-season phase (days 5-7, DOY 105-107) -> Kc_mid
+    assert compute_kc_daily(calendar, 105, 2020) == pytest.approx(1.2)
+    assert compute_kc_daily(calendar, 106, 2020) == pytest.approx(1.2)
+    assert compute_kc_daily(calendar, 107, 2020) == pytest.approx(1.2)
+    # Late-season phase (days 8-9, DOY 108-109) -> Kc_end
+    assert compute_kc_daily(calendar, 108, 2020) == pytest.approx(0.6)
     assert compute_kc_daily(calendar, 109, 2020) == pytest.approx(0.6)
 
 

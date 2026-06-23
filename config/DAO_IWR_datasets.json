@@ -20,6 +20,42 @@
                 },
                 "irrigated_areas_mask": {
                     "filename": "distretti_irrigui_SIGRIAN_3035_1km_mask.tif"
+                },
+                "phenoe1": {
+                    "folder": "phenology",
+                    "filename": "phenoe1_v04.tif"
+                },
+                "phenoe2": {
+                    "folder": "phenology",
+                    "filename": "phenoe2_v04.tif"
+                },
+                "phenom1": {
+                    "folder": "phenology",
+                    "filename": "phenom1_v04.tif"
+                },
+                "phenom2": {
+                    "folder": "phenology",
+                    "filename": "phenom2_v04.tif"
+                },
+                "phenos1": {
+                    "folder": "phenology",
+                    "filename": "phenos1_v04.tif"
+                },
+                "phenos2": {
+                    "folder": "phenology",
+                    "filename": "phenos2_v04.tif"
+                },
+                "phenosen1": {
+                    "folder": "phenology",
+                    "filename": "phenosen1_v04.tif"
+                },
+                "phenosen2": {
+                    "folder": "phenology",
+                    "filename": "phenosen2_v04.tif"
+                },
+                "phenonseasons": {
+                    "folder": "phenology",
+                    "filename": "phenonseasons_v04.tif"
                 }
             }
         },
@@ -78,6 +114,33 @@
                 },
                 "irrigated_areas_mask_aligned": {
                     "filename": "distretti_irrigui_SIGRIAN_3035_1km_mask_aligned.tif"
+                },
+                "phenoe1_aligned": {
+                    "filename": "phenoe1_v04_aligned.tif"
+                },
+                "phenoe2_aligned": {
+                    "filename": "phenoe2_v04_aligned.tif"
+                },
+                "phenom1_aligned": {
+                    "filename": "phenom1_v04_aligned.tif"
+                },
+                "phenom2_aligned": {
+                    "filename": "phenom2_v04_aligned.tif"
+                },
+                "phenos1_aligned": {
+                    "filename": "phenos1_v04_aligned.tif"
+                },
+                "phenos2_aligned": {
+                    "filename": "phenos2_v04_aligned.tif"
+                },
+                "phenosen1_aligned": {
+                    "filename": "phenosen1_v04_aligned.tif"
+                },
+                "phenosen2_aligned": {
+                    "filename": "phenosen2_v04_aligned.tif"
+                },
+                "phenonseasons_aligned": {
+                    "filename": "phenonseasons_v04_aligned.tif"
                 }
             }
         }

@@ -179,7 +179,7 @@ def compute_kc_daily(
 ) -> float:
     """Compute crop coefficient (Kc) for a given date.
     
-    Uses linear interpolation within growth stages (FAO-56 approach).
+    Returns static Kc value based on crop growth phase (no interpolation).
     Returns Kc_off_season if outside growing season.
     
     Args:
@@ -188,7 +188,7 @@ def compute_kc_daily(
         year: Calendar year.
     
     Returns:
-        Crop coefficient value in range [0, max(Kc_mid, Kc_ini)].
+        Crop coefficient value corresponding to current growth phase.
     
     """
     if not calendar.is_growing_season(doy, year):
@@ -202,27 +202,17 @@ def compute_kc_daily(
     days_initial = schedule.get_stage_duration_days(GrowthStage.INITIAL)
     days_development = schedule.get_stage_duration_days(GrowthStage.DEVELOPMENT)
     days_mid = schedule.get_stage_duration_days(GrowthStage.MID_SEASON)
-    days_late = schedule.get_stage_duration_days(GrowthStage.LATE_SEASON)
 
     if days_since_planting < days_initial:
         return float(schedule.kc_ini)
 
-    days_since_planting -= days_initial
-    if days_since_planting < days_development:
-        if days_development <= 1:
-            return float(schedule.kc_mid)
-        progress = days_since_planting / float(days_development - 1)
-        return float(schedule.kc_ini + progress * (schedule.kc_mid - schedule.kc_ini))
+    if days_since_planting < days_initial + days_development:
+        return float(schedule.kc_ini)
 
-    days_since_planting -= days_development
-    if days_since_planting < days_mid:
+    if days_since_planting < days_initial + days_development + days_mid:
         return float(schedule.kc_mid)
 
-    days_since_planting -= days_mid
-    if days_late <= 1:
-        return float(schedule.kc_end)
-    progress = min(days_since_planting / float(days_late - 1), 1.0)
-    return float(schedule.kc_mid + progress * (schedule.kc_end - schedule.kc_mid))
+    return float(schedule.kc_end)
 
 
 def load_crop_calendars_from_csv(

@@ -16,6 +16,196 @@ import rasterio
 from iwr_processing.iwr_layers import CropFraction, SoilLayer
 
 
+PHENOLOGY_STAGE_INACTIVE = np.uint8(0)
+PHENOLOGY_STAGE_GROWING = np.uint8(1)
+PHENOLOGY_STAGE_MAXIMUM = np.uint8(2)
+PHENOLOGY_STAGE_SENESCENCE = np.uint8(3)
+PHENOLOGY_STAGE_NODATA = np.uint8(255)
+
+
+def doy_to_dekad(doy: int) -> int:
+    """Convert day-of-year to dekad index in [1, 36]."""
+    if doy < 1:
+        raise ValueError(f"doy must be >= 1, got {doy}.")
+    return min(int(np.ceil(float(doy) / 10.0)), 36)
+
+
+def classify_phenology_stage(
+    doy: int,
+    sos: np.ndarray,
+    tom: np.ndarray,
+    sen: np.ndarray,
+    eos: np.ndarray,
+    nodata_value: int | float | None = None,
+) -> np.ndarray:
+    """Classify phenology stage per pixel from 1..108 dekad phenology layers.
+
+    Stage codes:
+      0 = inactive, 1 = growing, 2 = maximum, 3 = senescence, 255 = nodata.
+    """
+    sos_arr = np.asarray(sos, dtype=np.float32)
+    tom_arr = np.asarray(tom, dtype=np.float32)
+    sen_arr = np.asarray(sen, dtype=np.float32)
+    eos_arr = np.asarray(eos, dtype=np.float32)
+
+    if not (sos_arr.shape == tom_arr.shape == sen_arr.shape == eos_arr.shape):
+        raise ValueError("sos, tom, sen, eos must share the same shape.")
+
+    d = doy_to_dekad(doy)
+    candidates = (d, d + 36, d + 72)
+
+    valid = (
+        np.isfinite(sos_arr)
+        & np.isfinite(tom_arr)
+        & np.isfinite(sen_arr)
+        & np.isfinite(eos_arr)
+        & (sos_arr > 0)
+        & (tom_arr > 0)
+        & (sen_arr > 0)
+        & (eos_arr > 0)
+    )
+
+    if nodata_value is not None:
+        valid &= (
+            (sos_arr != nodata_value)
+            & (tom_arr != nodata_value)
+            & (sen_arr != nodata_value)
+            & (eos_arr != nodata_value)
+        )
+
+    stage = np.full(sos_arr.shape, PHENOLOGY_STAGE_INACTIVE, dtype=np.uint8)
+    stage[~valid] = PHENOLOGY_STAGE_NODATA
+
+    t_selected = np.full(sos_arr.shape, -1.0, dtype=np.float32)
+    for t in candidates:
+        active = valid & (sos_arr <= t) & (t < eos_arr) & (t_selected < 0.0)
+        t_selected[active] = float(t)
+
+    has_active = valid & (t_selected >= 0.0)
+
+    growing = has_active & (sos_arr <= t_selected) & (t_selected < tom_arr)
+    maximum = has_active & (tom_arr <= t_selected) & (t_selected < sen_arr)
+    senescence = has_active & (sen_arr <= t_selected) & (t_selected < eos_arr)
+
+    stage[growing] = PHENOLOGY_STAGE_GROWING
+    stage[maximum] = PHENOLOGY_STAGE_MAXIMUM
+    stage[senescence] = PHENOLOGY_STAGE_SENESCENCE
+
+    return stage
+
+
+def _merge_two_season_stage_and_kc(
+    stage_1: np.ndarray,
+    kc_1: np.ndarray,
+    stage_2: np.ndarray,
+    kc_2: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Merge two season outputs with priority maximum > senescence > growing."""
+    stage_out = stage_1.copy()
+    kc_out = kc_1.copy()
+
+    rank = np.zeros(256, dtype=np.int8)
+    rank[int(PHENOLOGY_STAGE_INACTIVE)] = 0
+    rank[int(PHENOLOGY_STAGE_GROWING)] = 1
+    rank[int(PHENOLOGY_STAGE_SENESCENCE)] = 2
+    rank[int(PHENOLOGY_STAGE_MAXIMUM)] = 3
+    rank[int(PHENOLOGY_STAGE_NODATA)] = -1
+
+    rank_1 = rank[stage_1.astype(np.uint8)]
+    rank_2 = rank[stage_2.astype(np.uint8)]
+
+    take_2 = (stage_2 != PHENOLOGY_STAGE_NODATA) & (
+        (stage_1 == PHENOLOGY_STAGE_NODATA) | (rank_2 > rank_1)
+    )
+
+    stage_out[take_2] = stage_2[take_2]
+    kc_out[take_2] = kc_2[take_2]
+    return stage_out, kc_out
+
+
+def compute_kc_from_phenology_stage(
+    doy: int,
+    sos_1: np.ndarray,
+    tom_1: np.ndarray,
+    sen_1: np.ndarray,
+    eos_1: np.ndarray,
+    kc_ini: float,
+    kc_mid: float,
+    kc_end: float,
+    kc_off: float = 0.5,
+    nodata_value: int | float | None = None,
+    sos_2: np.ndarray | None = None,
+    tom_2: np.ndarray | None = None,
+    sen_2: np.ndarray | None = None,
+    eos_2: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute per-pixel stage and Kc for a given day-of-year.
+
+    The phenology layers are expected on the 1..108 dekad axis.
+    """
+    d = doy_to_dekad(doy)
+    candidates = (d, d + 36, d + 72)
+
+    def _single_season_kc(
+        sos: np.ndarray,
+        tom: np.ndarray,
+        sen: np.ndarray,
+        eos: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        sos_arr = np.asarray(sos, dtype=np.float32)
+        tom_arr = np.asarray(tom, dtype=np.float32)
+        sen_arr = np.asarray(sen, dtype=np.float32)
+        eos_arr = np.asarray(eos, dtype=np.float32)
+
+        if not (sos_arr.shape == tom_arr.shape == sen_arr.shape == eos_arr.shape):
+            raise ValueError("sos, tom, sen, eos must share the same shape.")
+
+        stage = classify_phenology_stage(
+            doy=doy,
+            sos=sos_arr,
+            tom=tom_arr,
+            sen=sen_arr,
+            eos=eos_arr,
+            nodata_value=nodata_value,
+        )
+
+        kc = np.full(sos_arr.shape, float(kc_off), dtype=np.float32)
+        kc[stage == PHENOLOGY_STAGE_NODATA] = np.nan
+
+        valid = stage != PHENOLOGY_STAGE_NODATA
+        t_selected = np.full(sos_arr.shape, -1.0, dtype=np.float32)
+        for t in candidates:
+            active = valid & (sos_arr <= t) & (t < eos_arr) & (t_selected < 0.0)
+            t_selected[active] = float(t)
+
+        growing = stage == PHENOLOGY_STAGE_GROWING
+        if np.any(growing):
+            denom = np.maximum(tom_arr - sos_arr, 1.0)
+            frac = np.clip((t_selected - sos_arr) / denom, 0.0, 1.0)
+            kc[growing] = float(kc_ini) + frac[growing] * float(kc_mid - kc_ini)
+
+        maximum = stage == PHENOLOGY_STAGE_MAXIMUM
+        if np.any(maximum):
+            kc[maximum] = float(kc_mid)
+
+        senescence = stage == PHENOLOGY_STAGE_SENESCENCE
+        if np.any(senescence):
+            denom = np.maximum(eos_arr - sen_arr, 1.0)
+            frac = np.clip((t_selected - sen_arr) / denom, 0.0, 1.0)
+            kc[senescence] = float(kc_mid) + frac[senescence] * float(kc_end - kc_mid)
+
+        return stage, kc.astype(np.float32)
+
+    stage_1, kc_1 = _single_season_kc(sos_1, tom_1, sen_1, eos_1)
+
+    has_second_season = all(v is not None for v in (sos_2, tom_2, sen_2, eos_2))
+    if not has_second_season:
+        return stage_1, kc_1
+
+    stage_2, kc_2 = _single_season_kc(sos_2, tom_2, sen_2, eos_2)
+    return _merge_two_season_stage_and_kc(stage_1, kc_1, stage_2, kc_2)
+
+
 def compute_taw(
     theta_fc: np.ndarray,
     theta_wp: np.ndarray,

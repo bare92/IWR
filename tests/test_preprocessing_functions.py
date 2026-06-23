@@ -63,8 +63,7 @@ def test_aggregate_fractional_layers_preserves_nodata_and_normalizes_description
 
 def test_build_crop_calendar_template_from_fractional_raster(tmp_path):
     raster_path = tmp_path / "land_cover_fractional.tif"
-    fao_kc_path = tmp_path / "fao56_kc.csv"
-    output_csv = tmp_path / "crop_calendar_auto.csv"
+    output_csv = tmp_path / "crop_calendar_template.csv"
 
     with rasterio.open(
         raster_path,
@@ -83,16 +82,8 @@ def test_build_crop_calendar_template_from_fractional_raster(tmp_path):
         dst.set_band_description(1, "frac_winter_wheat")
         dst.set_band_description(2, "frac_maize_field_grain_field_corn")
 
-    fao_kc_path.write_text(
-        "crop_id,crop_name_fao56,kc_ini,kc_mid,kc_end\n"
-        "winter_wheat,Winter Wheat,0.40-0.70,1.15,0.25-0.40\n"
-        "maize_field_grain_field_corn,Maize Field,0.30,1.20,0.60\n",
-        encoding="utf-8",
-    )
-
     result_path = build_crop_calendar_template_from_raster(
         land_cover_raster=str(raster_path),
-        fao56_kc_csv=str(fao_kc_path),
         output=str(output_csv),
     )
 
@@ -106,10 +97,6 @@ def test_build_crop_calendar_template_from_fractional_raster(tmp_path):
     ]
     assert np.isnan(df.loc[df["crop_id"] == "winter_wheat", "planting_doy"]).all()
     assert np.isnan(df.loc[df["crop_id"] == "winter_wheat", "harvest_doy"]).all()
-    assert np.isclose(
-        df.loc[df["crop_id"] == "winter_wheat", "kc_ini"].iloc[0], 0.4
-    )
-    assert np.isclose(
-        df.loc[df["crop_id"] == "maize_field_grain_field_corn", "kc_mid"].iloc[0],
-        1.2,
-    )
+    assert np.isnan(df.loc[df["crop_id"] == "winter_wheat", "kc_ini"]).all()
+    assert np.isnan(df.loc[df["crop_id"] == "winter_wheat", "kc_mid"]).all()
+    assert np.isnan(df.loc[df["crop_id"] == "winter_wheat", "kc_end"]).all()

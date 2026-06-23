@@ -5,6 +5,7 @@ Each public function in this module can be referenced by name in the
 WORKFLOW.PROCESS[*].process_list[*].function config key.
 """
 
+import gc
 import logging
 import os
 import tempfile
@@ -20,18 +21,6 @@ def _normalize_crop_token(value: str) -> str:
     token = re.sub(r"\s+", "_", token)
     token = re.sub(r"_+", "_", token)
     return token.strip("_")
-
-
-def _parse_first_float(value: object) -> float | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    match = re.search(r"[-+]?\d*\.?\d+", text)
-    if match is None:
-        return None
-    return float(match.group(0))
 
 
 def _as_class_list(classes: list[str | int] | str | None) -> list[str | int]:
@@ -115,8 +104,10 @@ def match_grid(
     list[str]
         Paths of the aligned raster files (temp files or ``[output]``).
     """
-    import rioxarray as rxr
+    import numpy as np
+    import rasterio
     from rasterio.enums import Resampling
+    from rasterio.warp import reproject as warp_reproject
 
     try:
         resampling_enum = Resampling[resampling_method.lower()]
@@ -127,34 +118,68 @@ def match_grid(
         )
         resampling_enum = Resampling.nearest
 
-    reference = rxr.open_rasterio(grid, masked=True)
-    logger.info("Reference grid  CRS   : %s", reference.rio.crs)
-    logger.info("Reference grid  shape : %s", reference.rio.shape)
+    with rasterio.open(grid) as ref:
+        dst_crs = ref.crs
+        dst_transform = ref.transform
+        dst_height = ref.height
+        dst_width = ref.width
+        logger.info("Reference grid  CRS   : %s", dst_crs)
+        logger.info("Reference grid  shape : %s", (dst_height, dst_width))
 
     aligned_paths: list[str] = []
 
     for i, inp in enumerate(inputs):
         nodata = nodata_values[i] if nodata_values and i < len(nodata_values) else None
 
-        ds = rxr.open_rasterio(inp, masked=True)
-        if nodata is not None:
-            ds = ds.where(ds != nodata)
+        with rasterio.open(inp) as src:
+            src_nodata = nodata if nodata is not None else src.nodata
 
-        aligned = ds.rio.reproject_match(reference, resampling=resampling_enum)
-
-        # Write to the final output path when single input and output given,
-        # otherwise write to a temporary file so merge_rasters can consume it.
-        if output is not None and len(inputs) == 1:
-            out_path = output
-            os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
-        else:
-            tmp = tempfile.NamedTemporaryFile(
-                suffix=".tif", prefix="iwr_matched_", delete=False
+            profile = src.profile.copy()
+            profile.update(
+                {
+                    "crs": dst_crs,
+                    "transform": dst_transform,
+                    "width": dst_width,
+                    "height": dst_height,
+                    "compress": "lzw",
+                    "tiled": True,
+                    "blockxsize": 256,
+                    "blockysize": 256,
+                }
             )
-            tmp.close()
-            out_path = tmp.name
+            if src_nodata is not None:
+                profile["nodata"] = src_nodata
 
-        aligned.rio.to_raster(out_path)
+            if output is not None and len(inputs) == 1:
+                out_path = output
+                os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+            else:
+                tmp = tempfile.NamedTemporaryFile(
+                    suffix=".tif", prefix="iwr_matched_", delete=False
+                )
+                tmp.close()
+                out_path = tmp.name
+
+            with rasterio.open(out_path, "w", **profile) as dst:
+                for band_idx in range(1, src.count + 1):
+                    # Allocate only the small output array; GDAL reads the
+                    # source internally via rasterio.band — no full-raster
+                    # load into Python memory.
+                    dst_array = np.zeros((dst_height, dst_width), dtype=profile["dtype"])
+                    warp_reproject(
+                        source=rasterio.band(src, band_idx),
+                        destination=dst_array,
+                        src_transform=src.transform,
+                        src_crs=src.crs,
+                        dst_transform=dst_transform,
+                        dst_crs=dst_crs,
+                        resampling=resampling_enum,
+                        src_nodata=src_nodata,
+                        dst_nodata=src_nodata,
+                    )
+                    dst.write(dst_array, band_idx)
+                    del dst_array
+
         logger.info("  [%d/%d] aligned: %s -> %s", i + 1, len(inputs), inp, out_path)
         aligned_paths.append(out_path)
 
@@ -349,6 +374,7 @@ def aggregate_fractional_layers(
                 dst_crs=dst_crs,
                 resampling=Resampling.average,
             )
+            del indicator
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 percent = np.where(
@@ -356,12 +382,20 @@ def aggregate_fractional_layers(
                     (class_fraction / valid_fraction) * 100.0,
                     output_nodata,
                 )
+            del class_fraction
             clipped = np.where(
                 valid_fraction > 0,
                 np.clip(percent, 0.0, 100.0),
                 output_nodata,
             )
+            del percent
             out_stack[idx, :, :] = clipped.astype(np.float32)
+            del clipped
+            gc.collect()
+
+        # Release the large source arrays before writing output
+        del src_arr, valid_mask, valid_fraction
+        gc.collect()
 
         out_path = output or tempfile.NamedTemporaryFile(
             suffix=".tif", prefix="iwr_fractional_", delete=False
@@ -498,6 +532,11 @@ def apply_raster_mask(
         masked_data.rio.to_raster(out_path)
         out_paths.append(out_path)
         logger.info("  [%d/%d] masked: %s -> %s", idx + 1, len(path_list), in_path, out_path)
+        del data, mask_matched, masked_data
+        gc.collect()
+
+    del mask_da
+    gc.collect()
 
     if len(out_paths) == 1:
         return out_paths[0]
@@ -506,7 +545,7 @@ def apply_raster_mask(
 
 def build_crop_calendar_template_from_raster(
     land_cover_raster: str,
-    fao56_kc_csv: str,
+    fao56_kc_csv: str | None = None,
     output: str | None = None,
     class_map_csv: str | None = None,
     min_fraction_threshold: float = 0.0,
@@ -516,22 +555,19 @@ def build_crop_calendar_template_from_raster(
     """Build a crop-calendar template CSV from crop raster coverage.
 
     The output template intentionally has no ``year`` column and leaves
-    ``planting_doy`` / ``harvest_doy`` empty for manual completion.
+    crop-calendar values empty for manual completion.
 
     Input raster can be either:
     - multiband fractional raster with crop band descriptions (preferred), or
     - single-band categorical raster using ``class_map_csv`` to map values to crop IDs.
     """
     import numpy as np
-    import pandas as pd
     import rasterio
 
     if output is None:
         raise ValueError("'output' path is required.")
     if not os.path.exists(land_cover_raster):
         raise FileNotFoundError(f"Land-cover raster not found: {land_cover_raster}")
-    if not os.path.exists(fao56_kc_csv):
-        raise FileNotFoundError(f"FAO56 KC CSV not found: {fao56_kc_csv}")
 
     class_name_by_code: dict[int, str] = {}
     if class_map_csv:
@@ -604,61 +640,16 @@ def build_crop_calendar_template_from_raster(
     if not used_crop_tokens:
         raise ValueError("No crop classes detected in input raster.")
 
-    fao_df = pd.read_csv(fao56_kc_csv)
-    required_cols = {"crop_id", "crop_name_fao56", "kc_ini", "kc_mid", "kc_end"}
-    missing_cols = required_cols - set(fao_df.columns)
-    if missing_cols:
-        raise ValueError(
-            f"FAO56 KC CSV is missing required columns: {sorted(missing_cols)}"
-        )
-
-    fao_df["crop_id_norm"] = fao_df["crop_id"].map(_normalize_crop_token)
-    fao_df["crop_name_norm"] = fao_df["crop_name_fao56"].map(_normalize_crop_token)
-
-    aliases = {
-        "wheat": "winter_wheat",
-        "maize": "maize_field_grain_field_corn",
-        "corn": "maize_field_grain_field_corn",
-    }
-
     out_rows: list[dict[str, object]] = []
     for token in used_crop_tokens:
-        token_resolved = aliases.get(token, token)
-
-        row = fao_df.loc[fao_df["crop_id_norm"] == token_resolved]
-        if row.empty:
-            row = fao_df.loc[fao_df["crop_name_norm"] == token_resolved]
-        if row.empty:
-            # Fallback: substring match to help with close naming variants.
-            row = fao_df.loc[
-                fao_df["crop_id_norm"].str.contains(token_resolved, regex=False)
-                | fao_df["crop_name_norm"].str.contains(token_resolved, regex=False)
-            ]
-
-        if row.empty:
-            logger.warning("No FAO56 KC match for crop token '%s'", token)
-            crop_id = token
-            kc_ini = ""
-            kc_mid = ""
-            kc_end = ""
-        else:
-            chosen = row.iloc[0]
-            crop_id = str(chosen["crop_id"])
-            kc_ini_val = _parse_first_float(chosen.get("kc_ini"))
-            kc_mid_val = _parse_first_float(chosen.get("kc_mid"))
-            kc_end_val = _parse_first_float(chosen.get("kc_end"))
-            kc_ini = "" if kc_ini_val is None else round(kc_ini_val, 3)
-            kc_mid = "" if kc_mid_val is None else round(kc_mid_val, 3)
-            kc_end = "" if kc_end_val is None else round(kc_end_val, 3)
-
         out_rows.append(
             {
-                "crop_id": crop_id,
+                "crop_id": token,
                 "planting_doy": "",
                 "harvest_doy": "",
-                "kc_ini": kc_ini,
-                "kc_mid": kc_mid,
-                "kc_end": kc_end,
+                "kc_ini": "",
+                "kc_mid": "",
+                "kc_end": "",
                 "growth_stage_days_initial": "",
                 "growth_stage_days_development": "",
                 "growth_stage_days_mid_season": "",
@@ -666,6 +657,8 @@ def build_crop_calendar_template_from_raster(
                 "kc_off_season": kc_off_season,
             }
         )
+
+    import pandas as pd
 
     output_df = pd.DataFrame(out_rows)
     output_df = output_df.sort_values("crop_id").reset_index(drop=True)
