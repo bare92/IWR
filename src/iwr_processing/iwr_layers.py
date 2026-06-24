@@ -138,38 +138,6 @@ def class_to_fc_wp(
     return fc, wp
 
 
-def _normalize_crop_name(name: str) -> str:
-    """Normalize crop names before matching across rasters and tables."""
-    normalized = name.strip().lower()
-    normalized = re.sub(r"[_\-/]+", " ", normalized)
-    normalized = re.sub(r"\s+", " ", normalized)
-    return normalized
-
-
-def find_most_similar_name(
-    raster_name: str,
-    candidate_names: Sequence[str],
-) -> tuple[str | None, float]:
-    """Return the closest candidate name and similarity score in [0, 1]."""
-    if not candidate_names:
-        return None, 0.0
-
-    normalized_raster = _normalize_crop_name(raster_name)
-    best_name: str | None = None
-    best_score = -1.0
-
-    for candidate in candidate_names:
-        normalized_candidate = _normalize_crop_name(candidate)
-
-        if normalized_candidate == normalized_raster:
-            return candidate, 1.0
-
-        score = SequenceMatcher(None, normalized_raster, normalized_candidate).ratio()
-        if score > best_score:
-            best_name = candidate
-            best_score = score
-
-    return best_name, best_score
 
 
 @dataclass
@@ -187,6 +155,108 @@ class CropParameter:
         """FAO-56 adjustment of p for ETc different from 5 mm/day."""
         p = self.p_table22_for_ETc_5mm_day + 0.04 * (5.0 - etc_mm_day)
         return float(np.clip(p, 0.1, 0.8))
+
+
+def find_most_similar_name(
+    target: str,
+    candidates: list[str],
+) -> tuple[str | None, float]:
+    """Return the closest candidate string and similarity score in [0, 1]."""
+    if not candidates:
+        return None, 0.0
+
+    target_norm = target.strip().lower()
+    best_name: str | None = None
+    best_score = -1.0
+
+    for name in candidates:
+        score = SequenceMatcher(None, target_norm, name.strip().lower()).ratio()
+        if score > best_score:
+            best_name = name
+            best_score = score
+
+    return best_name, best_score
+
+
+def _parse_float_maybe(value: object, default: float) -> float:
+    """Parse floats from numbers or simple strings like '0.25-0.40' / '0.60 or 0.35'."""
+    if value is None:
+        return default
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return float(value)
+
+    text = str(value).strip()
+    if not text:
+        return default
+
+    numbers = re.findall(r"[-+]?\d*\.?\d+", text)
+    if not numbers:
+        return default
+
+    vals = [float(v) for v in numbers]
+    return float(sum(vals) / len(vals))
+
+
+def load_crop_parameters(csv_path: str) -> dict[str, CropParameter]:
+    """Load crop parameters from CSV into a dict keyed by crop_id.
+
+    Supports both detailed FAO-56 tables and compact CSVs with columns like
+    `name, root_depth_max_m, Kc_ini, Kc_mid, Kc_end`.
+    """
+    df = pd.read_csv(csv_path)
+    if df.empty:
+        return {}
+
+    def _pick_column(options: list[str]) -> str | None:
+        lowered = {c.lower(): c for c in df.columns}
+        for option in options:
+            if option.lower() in lowered:
+                return lowered[option.lower()]
+        return None
+
+    crop_id_col = _pick_column(["crop_id", "Land_cover_name_FAO56", "name", "crop"])
+    if crop_id_col is None:
+        raise ValueError(
+            "Crop parameter CSV must include one of these columns: "
+            "crop_id, Land_cover_name_FAO56, name, crop"
+        )
+
+    crop_name_col = _pick_column(["crop_name_fao56", "name", "crop_name", "crop_id"])
+    category_col = _pick_column(["category"])
+    rd_min_col = _pick_column(["root_depth_min_m", "root_depth_min"])
+    rd_max_col = _pick_column(["root_depth_max_m", "root_depth_max"])
+    p_col = _pick_column(["p_table22_for_ETc_5mm_day", "p", "p_table22"])
+    source_col = _pick_column(["source"])
+    notes_col = _pick_column(["notes"])
+
+    result: dict[str, CropParameter] = {}
+    for _, row in df.iterrows():
+        crop_id = str(row[crop_id_col]).strip()
+        if not crop_id:
+            continue
+
+        crop_name = str(row[crop_name_col]).strip() if crop_name_col else crop_id
+        category = str(row[category_col]).strip() if category_col else "unknown"
+
+        root_depth_max = _parse_float_maybe(row[rd_max_col], 1.0) if rd_max_col else 1.0
+        root_depth_min = _parse_float_maybe(row[rd_min_col], root_depth_max) if rd_min_col else root_depth_max
+        p_value = _parse_float_maybe(row[p_col], 0.5) if p_col else 0.5
+
+        source = str(row[source_col]).strip() if source_col else None
+        notes = str(row[notes_col]).strip() if notes_col else None
+
+        result[crop_id] = CropParameter(
+            crop_id=crop_id,
+            crop_name_fao56=crop_name,
+            category=category,
+            root_depth_min_m=float(root_depth_min),
+            root_depth_max_m=float(root_depth_max),
+            p_table22_for_ETc_5mm_day=float(p_value),
+            source=source,
+            notes=notes,
+        )
+
+    return result
 
 
 @dataclass
@@ -286,109 +356,6 @@ class CropFraction:
             raise KeyError(f"Crop '{crop}' not found. Available: {self.crop_type}")
         idx = self.crop_type.index(crop)
         return self.raster[idx]
-
-    def find_similar_crop_name_in_table(self, crop: str) -> tuple[str | None, float]:
-        """Return the closest crop name available in the loaded parameter table."""
-        if self.crop_parameters is None:
-            raise ValueError("No crop parameter table was loaded.")
-
-        return find_most_similar_name(crop, list(self.crop_parameters.keys()))
-
-    def get_crop_parameter(self, crop: str) -> CropParameter:
-        """Return FAO-56 parameters for a given crop."""
-        if self.crop_parameters is None:
-            raise ValueError("No crop parameter table was loaded.")
-
-        if crop not in self.crop_parameters:
-            best_name, best_score = self.find_similar_crop_name_in_table(crop)
-            if best_name is None:
-                raise KeyError(
-                    f"Crop '{crop}' not found in parameter table. "
-                    f"Available: {list(self.crop_parameters)}"
-                )
-
-            raise KeyError(
-                f"Crop '{crop}' not found in parameter table. "
-                f"Closest match is '{best_name}' (score={best_score:.2f})."
-            )
-
-        return self.crop_parameters[crop]
-
-    def get_crop_root_depth(self, crop: str, use: str = "max") -> float:
-        """Return crop rooting depth.
-
-        use='min', 'max', or 'mean'
-        """
-        param = self.get_crop_parameter(crop)
-
-        if use == "min":
-            return param.root_depth_min_m
-        if use == "max":
-            return param.root_depth_max_m
-        if use == "mean":
-            return 0.5 * (param.root_depth_min_m + param.root_depth_max_m)
-
-        raise ValueError("use must be one of: 'min', 'max', 'mean'")
-
-    def get_crop_p(self, crop: str, etc_mm_day: float | None = None) -> float:
-        """Return FAO-56 depletion fraction p.
-
-        If etc_mm_day is provided, p is adjusted using the FAO-56 correction.
-        Otherwise, the Table 22 value for ETc = 5 mm/day is returned.
-        """
-        param = self.get_crop_parameter(crop)
-
-        if etc_mm_day is None:
-            return param.p_table22_for_ETc_5mm_day
-
-        return param.p_adjusted(etc_mm_day)
-
-
-def load_crop_parameters(csv_path: str) -> dict[str, CropParameter]:
-    """Load FAO-56 crop parameters from CSV.
-
-    Expected columns:
-    - crop_id
-    - crop_name_fao56
-    - category
-    - root_depth_min_m
-    - root_depth_max_m
-    - p_table22_for_ETc_5mm_day
-    """
-    df = pd.read_csv(csv_path)
-
-    required_columns = {
-        "crop_id",
-        "crop_name_fao56",
-        "category",
-        "root_depth_min_m",
-        "root_depth_max_m",
-        "p_table22_for_ETc_5mm_day",
-    }
-
-    missing_columns = required_columns - set(df.columns)
-    if missing_columns:
-        raise ValueError(
-            f"Crop parameter table is missing columns: {sorted(missing_columns)}"
-        )
-
-    crop_parameters: dict[str, CropParameter] = {}
-
-    for _, row in df.iterrows():
-        crop_id = str(row["crop_id"])
-
-        crop_parameters[crop_id] = CropParameter(
-            crop_id=crop_id,
-            crop_name_fao56=str(row["crop_name_fao56"]),
-            category=str(row["category"]),
-            root_depth_min_m=float(row["root_depth_min_m"]),
-            root_depth_max_m=float(row["root_depth_max_m"]),
-            p_table22_for_ETc_5mm_day=float(row["p_table22_for_ETc_5mm_day"]),
-            source=str(row["source"]) if "source" in df.columns and pd.notna(row["source"]) else None,
-            notes=str(row["notes"]) if "notes" in df.columns and pd.notna(row["notes"]) else None,
-        )
-
-    return crop_parameters
 
 
 @dataclass

@@ -1,2 +1,0 @@
-crop_id,planting_doy,harvest_doy,kc_ini,kc_mid,kc_end,growth_stage_days_initial,growth_stage_days_development,growth_stage_days_mid_season,growth_stage_days_late_season,kc_off_season
-common_wheat,60,239,0.30,1.15,0.30,20,50,80,30,0.5

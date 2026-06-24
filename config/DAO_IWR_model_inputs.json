@@ -60,10 +60,6 @@
                     }
                 }
             },
-            "crop_calendars": {
-                "csv_path": "{CROP_CALENDAR_CSV}",
-                "description": "Path to crop calendar CSV with columns: crop_id, year, planting_doy, harvest_doy, kc_ini, kc_mid, kc_end, growth_stage_days_initial, etc."
-            },
             "runner": {
                 "type": "monthly_iwr_runner",
                 "crop_name": "wheat",
