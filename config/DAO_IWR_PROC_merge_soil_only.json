@@ -1,0 +1,28 @@
+{
+    "WORKFLOW": {
+        "PROCESS": [
+            {
+                "name": "merge_soil_datasets",
+                "input": "{DATASETS.soil_1}",
+                "output": "{DATASETS.soil_aligned}",
+                "process_list": [
+                    {
+                        "function": "match_grid",
+                        "inputs": ["{DATASETS.soil_1}", "{DATASETS.soil_2}"],
+                        "nodata_values": [0, 0],
+                        "grid": "{DATASETS.grid}",
+                        "resampling_method": "Mode"
+                    },
+                    {
+                        "function": "merge_rasters",
+                        "output_nodata": 0
+                    },
+                    {
+                        "function": "apply_raster_mask",
+                        "mask": "{DATASETS.grid}"
+                    }
+                ]
+            }
+        ]
+    }
+}

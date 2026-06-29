@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import rasterio
 
-from utilities import read_forcing_day
+from utilities import read_forcing_geotiff_day
 from phenology_functions import (
     create_phenology_status_mask_from_date,
     PHENOLOGY_INACTIVE,
@@ -432,6 +432,7 @@ def write_daily_geotiff(output_path, data, profile, nodata=-9999.0):
 
     output_profile = profile.copy()
     output_profile.update(
+        driver="GTiff",
         dtype="float32",
         count=1,
         nodata=nodata,
@@ -530,10 +531,8 @@ def run_iwr_model(
     crop_fraction_data,
     crop_df,
     phenology,
-    precipitation_dataset,
-    precipitation_variable,
-    et0_dataset,
-    et0_variable,
+    precipitation_geotiff_folder,
+    et0_geotiff_folder,
     output_folder=None,
     output_profile=None,
     nodata=-9999.0,
@@ -590,16 +589,20 @@ def run_iwr_model(
 
     while current_date <= end_date:
 
-        precipitation = read_forcing_day(
-            dataset=precipitation_dataset,
-            variable_name=precipitation_variable,
+        precipitation = read_forcing_geotiff_day(
+            geotiff_folder=precipitation_geotiff_folder,
             date=current_date,
+            min_value=0.0,
+            reference_profile=output_profile,
+            nodata=nodata,
         )
 
-        et0 = read_forcing_day(
-            dataset=et0_dataset,
-            variable_name=et0_variable,
+        et0 = read_forcing_geotiff_day(
+            geotiff_folder=et0_geotiff_folder,
             date=current_date,
+            min_value=0.0,
+            reference_profile=output_profile,
+            nodata=nodata,
         )
 
         phenology_status = create_phenology_status_mask_from_date(

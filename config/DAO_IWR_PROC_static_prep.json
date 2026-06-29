@@ -9,13 +9,13 @@
                     {
                         "function": "match_grid",
                         "inputs": ["{DATASETS.soil_1}", "{DATASETS.soil_2}"],
-                        "nodata_values": [255, 255],
+                        "nodata_values": [0, 0],
                         "grid": "{DATASETS.grid}",
                         "resampling_method": "Mode"
                     },
                     {
                         "function": "merge_rasters",
-                        "output_nodata": 255
+                        "output_nodata": 0
                     },
                     {
                         "function": "apply_raster_mask",

@@ -1,36 +1,32 @@
 {
-  "start_date": "2023-01-01",
-  "end_date": "2023-12-31",
+  "start_date": "2021-01-01",
+  "end_date": "2024-12-31",
 
-  "irrigated_areas_path": "/home/riccardo/Documents/07_Data/DAO/processed/distretti_irrigui_SIGRIAN_3035_1km_mask_aligned.tif",
-  "land_cover_fractions_path": "/home/riccardo/Documents/07_Data/DAO/processed/land_cover_aligned.tif",
-  "soil_texture_path": "/home/riccardo/Documents/07_Data/DAO/processed/soil_texture_aligned.tif",
+  "irrigated_areas_path": "/share/data/DAO/static/processed/distretti_irrigui_SIGRIAN_3035_1km_mask_aligned.tif",
+  "land_cover_fractions_path": "/share/data/DAO/static/processed/land_cover_aligned.tif",
+  "soil_texture_path": "/share/data/DAO/static/processed/soil_texture_aligned.tif",
 
   "phenology_paths": {
-    "phenoe1": "/home/riccardo/Documents/07_Data/DAO/processed/phenoe1_v04_aligned.tif",
-    "phenoe2": "/home/riccardo/Documents/07_Data/DAO/processed/phenoe2_v04_aligned.tif",
-    "phenom1": "/home/riccardo/Documents/07_Data/DAO/processed/phenom1_v04_aligned.tif",
-    "phenom2": "/home/riccardo/Documents/07_Data/DAO/processed/phenom2_v04_aligned.tif",
-    "phenonseasons": "/home/riccardo/Documents/07_Data/DAO/processed/phenonseasons_v04_aligned.tif",
-    "phenos1": "/home/riccardo/Documents/07_Data/DAO/processed/phenos1_v04_aligned.tif",
-    "phenos2": "/home/riccardo/Documents/07_Data/DAO/processed/phenos2_v04_aligned.tif",
-    "phenosen1": "/home/riccardo/Documents/07_Data/DAO/processed/phenosen1_v04_aligned.tif",
-    "phenosen2": "/home/riccardo/Documents/07_Data/DAO/processed/phenosen2_v04_aligned.tif"
+    "phenoe1": "/share/data/DAO/static/processed/phenoe1_v04_aligned.tif",
+    "phenoe2": "/share/data/DAO/static/processed/phenoe2_v04_aligned.tif",
+    "phenom1": "/share/data/DAO/static/processed/phenom1_v04_aligned.tif",
+    "phenom2": "/share/data/DAO/static/processed/phenom2_v04_aligned.tif",
+    "phenonseasons": "/share/data/DAO/static/processed/phenonseasons_v04_aligned.tif",
+    "phenos1": "/share/data/DAO/static/processed/phenos1_v04_aligned.tif",
+    "phenos2": "/share/data/DAO/static/processed/phenos2_v04_aligned.tif",
+    "phenosen1": "/share/data/DAO/static/processed/phenosen1_v04_aligned.tif",
+    "phenosen2": "/share/data/DAO/static/processed/phenosen2_v04_aligned.tif"
   },
 
-  "precipitation_folder": "/home/riccardo/Documents/07_Data/DAO/DAO_micromet_outputs_check/outputs/P",
-  "et0_folder": "/home/riccardo/Documents/07_Data/DAO/DAO_micromet_outputs_check/outputs/ET_HS",
+  "precipitation_folder": "/share/data/DAO/input/output_geotiffs/P",
+  "et0_folder": "/share/data/DAO/input/output_geotiffs/PET",
+  "precipitation_geotiff_folder": "/share/data/DAO/input/output_geotiffs/P",
+  "et0_geotiff_folder": "/share/data/DAO/input/output_geotiffs/PET",
 
-  "soil_output_folder": "/home/riccardo/Documents/07_Data/DAO/processed/soil_parameters",
+  "soil_output_folder": "/share/data/DAO/static/processed/soil_parameters",
 
-  "iwr_output_folder": "/home/riccardo/Documents/07_Data/DAO/processed/iwr_daily",
+  "iwr_output_folder": "/share/data/DAO/output/IWR",
 
-  "crop_fraction_path": "/home/riccardo/Documents/07_Data/DAO/processed/land_cover_aligned.tif",
-  "crop_parameters_csv": "/home/riccardo/Documents/07_Data/DAO/processed/crop_parameters.csv",
-
-  "precipitation_nc_path": "/share/data/DAO/FEST_storico_2021_2025/P.nc",
-  "precipitation_variable": "P_sim",
-
-  "et0_nc_path": "/share/data/DAO/FEST_storico_2021_2025/PET.nc",
-  "et0_variable": "PET_sim"
+  "crop_fraction_path": "/share/data/DAO/static/processed/land_cover_aligned.tif",
+  "crop_parameters_csv": "/share/data/DAO/static/processed/crop_parameters_11crops.csv"
 }

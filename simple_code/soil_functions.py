@@ -98,6 +98,7 @@ def create_soil_parameter_rasters(
     )
 
     profile.update(
+        driver="GTiff",
         dtype="float32",
         count=1,
         nodata=nodata,

@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 from datetime import datetime
-from utilities import open_forcing_dataset
 
 import rasterio
 
@@ -26,7 +25,7 @@ def read_raster(raster_path):
 
 
 def main():
-    config = read_config("config.json")
+    config = read_config("config/config.json")
 
     start_date = datetime.strptime(config["start_date"], "%Y-%m-%d")
     end_date = datetime.strptime(config["end_date"], "%Y-%m-%d")
@@ -41,8 +40,8 @@ def main():
     }
     phenology = load_phenology_layers(phenology_paths)
 
-    precipitation_folder = Path(config["precipitation_folder"])
-    et0_folder = Path(config["et0_folder"])
+    precipitation_geotiff_folder = Path(config["precipitation_geotiff_folder"])
+    et0_geotiff_folder = Path(config["et0_geotiff_folder"])
 
     soil_output_folder = Path(config["soil_output_folder"])
 
@@ -71,16 +70,6 @@ def main():
         crop_parameters_csv=crop_parameters_csv,
     )
 
-    precipitation_dataset = open_forcing_dataset(
-        nc_path=config["precipitation_nc_path"],
-        variable_name=config["precipitation_variable"],
-    )
-
-    et0_dataset = open_forcing_dataset(
-        nc_path=config["et0_nc_path"],
-        variable_name=config["et0_variable"],
-    )
-
     run_input_checks(
         reference_shape=total_available_water.shape,
         reference_profile=output_profile,
@@ -90,10 +79,6 @@ def main():
         crop_fraction_data=crop_fraction_data,
         crop_profile=crop_profile,
         phenology=phenology,
-        precipitation_dataset=precipitation_dataset,
-        precipitation_variable=config["precipitation_variable"],
-        et0_dataset=et0_dataset,
-        et0_variable=config["et0_variable"],
     )
 
     final_soil_moisture, cumulative_irrigation = run_iwr_model(
@@ -105,16 +90,11 @@ def main():
         crop_fraction_data=crop_fraction_data,
         crop_df=crop_df,
         phenology=phenology,
-        precipitation_dataset=precipitation_dataset,
-        precipitation_variable=config["precipitation_variable"],
-        et0_dataset=et0_dataset,
-        et0_variable=config["et0_variable"],
+        precipitation_geotiff_folder=precipitation_geotiff_folder,
+        et0_geotiff_folder=et0_geotiff_folder,
         output_folder=iwr_output_folder,
         output_profile=output_profile,
     )
-
-    precipitation_dataset.close()
-    et0_dataset.close()
 
     print("Configuration loaded")
     print("Start date:", start_date)
@@ -124,8 +104,8 @@ def main():
     print("Soil texture:", soil_texture_path)
     print("Phenology:", phenology_paths)
     print("Phenology layers loaded:", list(phenology.keys()))
-    print("Precipitation folder:", precipitation_folder)
-    print("ET0 folder:", et0_folder)
+    print("Precipitation folder:", precipitation_geotiff_folder)
+    print("ET0 folder:", et0_geotiff_folder)
 
     print("Soil parameter rasters created:")
     for name, path in soil_outputs.items():

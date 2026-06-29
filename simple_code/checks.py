@@ -102,10 +102,11 @@ def run_input_checks(
     crop_fraction_data,
     crop_profile,
     phenology,
-    precipitation_dataset,
-    precipitation_variable,
-    et0_dataset,
-    et0_variable,
+    precipitation_dataset=None,
+    precipitation_variable=None,
+    et0_dataset=None,
+    et0_variable=None,
+    check_forcing_spatial_shape=True,
 ):
     """
     Run all basic checks before starting the model.
@@ -122,17 +123,24 @@ def run_input_checks(
     for name, layer in phenology.items():
         check_array_shape(f"phenology layer '{name}'", layer, reference_shape)
 
-    check_forcing_shape(
-        dataset=precipitation_dataset,
-        variable_name=precipitation_variable,
-        reference_shape=reference_shape,
-    )
+    if (
+        check_forcing_spatial_shape
+        and precipitation_dataset is not None
+        and precipitation_variable is not None
+        and et0_dataset is not None
+        and et0_variable is not None
+    ):
+        check_forcing_shape(
+            dataset=precipitation_dataset,
+            variable_name=precipitation_variable,
+            reference_shape=reference_shape,
+        )
 
-    check_forcing_shape(
-        dataset=et0_dataset,
-        variable_name=et0_variable,
-        reference_shape=reference_shape,
-    )
+        check_forcing_shape(
+            dataset=et0_dataset,
+            variable_name=et0_variable,
+            reference_shape=reference_shape,
+        )
 
     check_crop_fractions(crop_fraction_data)
 
