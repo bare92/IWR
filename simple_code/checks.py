@@ -72,24 +72,38 @@ def check_crop_fractions(crop_fraction_data, tolerance=0.01):
     """
     Basic check on crop fractions.
 
-    Fractions should be >= 0 and normally their sum should not be much above 1.
+    Detect whether crop fractions are in 0-1 or 0-100 units and report
+    normalization expectations before the model run.
     """
 
     if np.nanmin(crop_fraction_data) < -tolerance:
         raise ValueError("Crop fraction raster contains negative values.")
 
-    crop_fraction_sum = np.nansum(
-        np.where(crop_fraction_data > 0, crop_fraction_data, 0.0),
-        axis=0,
-    )
+    check_data = np.where(
+        np.isfinite(crop_fraction_data) & (crop_fraction_data > 0),
+        crop_fraction_data,
+        0.0,
+    ).astype(np.float32)
 
-    max_fraction_sum = np.nanmax(crop_fraction_sum)
+    max_individual = float(np.nanmax(check_data))
+    crop_fraction_sum = np.sum(check_data, axis=0)
+    max_fraction_sum = float(np.nanmax(crop_fraction_sum))
 
-    if max_fraction_sum > 1.0 + tolerance:
+    if max_individual > 1.5 or max_fraction_sum > 1.5:
         print(
-            "Warning: crop fractions sum above 1 in some pixels. "
+            "Input crop fractions appear to be stored as percentages; "
+            "they will be divided by 100 inside prepare_crop_fractions()."
+        )
+        check_data = check_data / 100.0
+        crop_fraction_sum = np.sum(check_data, axis=0)
+        max_fraction_sum = float(np.nanmax(crop_fraction_sum))
+
+    if max_fraction_sum > 1.01:
+        print(
+            "Warning: crop fractions still sum above 1.01 in some pixels after "
+            "temporary conversion in checks. "
             f"Maximum sum = {max_fraction_sum:.3f}. "
-            "The model will normalize values above 1."
+            "The model will normalize those pixels in prepare_crop_fractions()."
         )
 
 

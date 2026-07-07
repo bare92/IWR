@@ -25,7 +25,8 @@ def read_raster(raster_path):
 
 
 def main():
-    config = read_config("config/config.json")
+    config_path = Path(__file__).resolve().parent / "config" / "config.json"
+    config = read_config(config_path)
 
     start_date = datetime.strptime(config["start_date"], "%Y-%m-%d")
     end_date = datetime.strptime(config["end_date"], "%Y-%m-%d")
@@ -94,6 +95,17 @@ def main():
         et0_geotiff_folder=et0_geotiff_folder,
         output_folder=iwr_output_folder,
         output_profile=output_profile,
+        strict_checks=config.get("strict_checks", True),
+        write_debug_csv=config.get("write_debug_csv", True),
+        write_cumulative_iwr=config.get("write_cumulative_iwr", True),
+        write_green_blue_outputs=False,
+        write_daily_green_blue_outputs=False,
+        debug_mode=config.get("debug_mode", False),
+        debug_output_folder=config.get("debug_output_folder", None),
+        max_precipitation_mm_day=config.get("max_precipitation_mm_day", 300),
+        max_et0_mm_day=config.get("max_et0_mm_day", 20),
+        max_iwr_mm_day=config.get("max_iwr_mm_day", 100),
+        min_valid_forcing_fraction=config.get("min_valid_forcing_fraction", 0.01),
     )
 
     print("Configuration loaded")
