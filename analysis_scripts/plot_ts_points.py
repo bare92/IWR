@@ -39,9 +39,9 @@ DEFAULT_VARIABLES = {
         "group": "model",
     },
     "actual_evapotranspiration": {
-        "folder": "/share/data/DAO/output/IWR_debug/actual_evapotranspiration",
-        "pattern": "actual_evapotranspiration_*.tif",
-        "label": "Actual evapotranspiration",
+        "folder": "/share/data/DAO/output/IWR_debug/actual_evapotranspiration_for_balance",
+        "pattern": "actual_evapotranspiration_for_balance_*.tif",
+        "label": "Actual evapotranspiration for balance",
         "units": "mm/day",
         "group": "model",
     },
@@ -80,6 +80,37 @@ DEFAULT_VARIABLES = {
         "units": "mm/day",
         "group": "forcing",
     },
+}
+
+
+# ==========================================================
+# SCRIPT RUN CONFIGURATION
+# Define all runtime variables here if you want to run without CLI args.
+# Any CLI argument provided will override these values.
+# ==========================================================
+
+RUN_CONFIG = {
+    # Required inputs
+    "points": "/share/data/DAO/auxiliary/shapefile_checks/point_check_crops.shp",  # e.g. "/path/to/points.shp"
+    "out_dir": "/share/data/DAO/output/IWR_plot_point_ts",
+
+    # Optional runtime controls
+    "variables": [
+        "iwr",
+        "actual_evapotranspiration",
+        "deep_percolation",
+        "runoff",
+        "soil_saturation",
+        "precipitation",
+        "et0",
+    ],
+    "id_field": None,
+
+    # Data folders
+    "iwr_folder": DEFAULT_VARIABLES["iwr"]["folder"],
+    "debug_folder": "/share/data/DAO/output/IWR_debug",
+    "precipitation_folder": DEFAULT_VARIABLES["precipitation"]["folder"],
+    "et0_folder": DEFAULT_VARIABLES["et0"]["folder"],
 }
 
 
@@ -148,6 +179,13 @@ def list_rasters_for_variable(variable_name, variable_config):
         )
 
     return pd.DataFrame(rows).sort_values("date")
+
+
+def folder_has_matching_rasters(folder, pattern):
+    folder = Path(folder)
+    if not folder.exists():
+        return False
+    return any(folder.glob(pattern))
 
 
 def build_raster_inventory(selected_variables, variables_config):
@@ -300,9 +338,19 @@ def extract_timeseries_for_point(point_row, inventory, variables_config):
     series_by_variable = []
 
     for variable_name, files_df in inventory.items():
+        print(
+            f"Extracting {variable_name} for {point_row['point_id']} "
+            f"({len(files_df)} files)",
+            flush=True,
+        )
         values = []
 
-        for _, file_row in files_df.iterrows():
+        for i, (_, file_row) in enumerate(files_df.iterrows(), start=1):
+            if i == 1 or i % 100 == 0 or i == len(files_df):
+                print(
+                    f"  {variable_name}: {i}/{len(files_df)}",
+                    flush=True,
+                )
             value = extract_value_from_raster(
                 raster_path=file_row["path"],
                 point_geom=point_geom,
@@ -410,80 +458,114 @@ def main():
 
     parser.add_argument(
         "--points",
-        required=True,
-        help="Path to point shapefile.",
+        default=RUN_CONFIG["points"],
+        help="Path to point shapefile. Defaults to RUN_CONFIG['points'].",
     )
 
     parser.add_argument(
         "--out-dir",
-        required=True,
-        help="Output folder for CSV and plots.",
+        default=RUN_CONFIG["out_dir"],
+        help="Output folder for CSV and plots. Defaults to RUN_CONFIG['out_dir'].",
     )
 
     parser.add_argument(
         "--variables",
         nargs="+",
-        default=[
-            "iwr",
-            "actual_evapotranspiration",
-            "deep_percolation",
-            "runoff",
-            "soil_saturation",
-            "precipitation",
-            "et0",
-        ],
+        default=RUN_CONFIG["variables"],
         help=(
             "Variables to extract/plot. Available: "
-            "iwr actual_evapotranspiration deep_percolation runoff "
-            "soil_saturation precipitation et0"
+            f"{' '.join(DEFAULT_VARIABLES.keys())}"
         ),
     )
 
     parser.add_argument(
         "--id-field",
-        default=None,
-        help="Optional point attribute to use as point ID.",
+        default=RUN_CONFIG["id_field"],
+        help="Optional point attribute to use as point ID. Defaults to RUN_CONFIG['id_field'].",
     )
 
     parser.add_argument(
         "--iwr-folder",
-        default=DEFAULT_VARIABLES["iwr"]["folder"],
-        help="Folder containing iwr_YYYYMMDD.tif files.",
+        default=RUN_CONFIG["iwr_folder"],
+        help="Folder containing iwr_YYYYMMDD.tif files. Defaults to RUN_CONFIG['iwr_folder'].",
     )
 
     parser.add_argument(
         "--debug-folder",
-        default="/share/data/DAO/output/IWR_debug",
-        help="Base folder containing debug variable subfolders.",
+        default=RUN_CONFIG["debug_folder"],
+        help="Base folder containing debug variable subfolders. Defaults to RUN_CONFIG['debug_folder'].",
     )
 
     parser.add_argument(
         "--precipitation-folder",
-        default=DEFAULT_VARIABLES["precipitation"]["folder"],
-        help="Folder containing daily precipitation GeoTIFFs.",
+        default=RUN_CONFIG["precipitation_folder"],
+        help="Folder containing daily precipitation GeoTIFFs. Defaults to RUN_CONFIG['precipitation_folder'].",
     )
 
     parser.add_argument(
         "--et0-folder",
-        default=DEFAULT_VARIABLES["et0"]["folder"],
-        help="Folder containing daily ET0/PET GeoTIFFs.",
+        default=RUN_CONFIG["et0_folder"],
+        help="Folder containing daily ET0/PET GeoTIFFs. Defaults to RUN_CONFIG['et0_folder'].",
+    )
+
+    parser.add_argument(
+        "--start-date",
+        default=None,
+        help="Optional start date YYYY-MM-DD. If provided, only rasters from this date onward are used.",
+    )
+
+    parser.add_argument(
+        "--end-date",
+        default=None,
+        help="Optional end date YYYY-MM-DD. If provided, only rasters up to this date are used.",
     )
 
     args = parser.parse_args()
+
+    if not args.points:
+        raise ValueError(
+            "No point shapefile provided. Set RUN_CONFIG['points'] in the script "
+            "or pass --points on the command line."
+        )
+
+    if not args.out_dir:
+        raise ValueError(
+            "No output directory provided. Set RUN_CONFIG['out_dir'] in the script "
+            "or pass --out-dir on the command line."
+        )
 
     output_dir = Path(args.out_dir)
     csv_dir = output_dir / "csv"
     plot_dir = output_dir / "plots"
 
-    variables_config = DEFAULT_VARIABLES.copy()
+    variables_config = {
+        name: config.copy() for name, config in DEFAULT_VARIABLES.items()
+    }
 
     # Override paths from command line
     variables_config["iwr"]["folder"] = args.iwr_folder
 
     debug_base = Path(args.debug_folder)
-    variables_config["actual_evapotranspiration"]["folder"] = str(
-        debug_base / "actual_evapotranspiration"
-    )
+
+    aet_folder_for_balance = debug_base / "actual_evapotranspiration_for_balance"
+    aet_pattern_for_balance = "actual_evapotranspiration_for_balance_*.tif"
+
+    aet_folder_old = debug_base / "actual_evapotranspiration"
+    aet_pattern_old = "actual_evapotranspiration_*.tif"
+
+    if folder_has_matching_rasters(aet_folder_for_balance, aet_pattern_for_balance):
+        variables_config["actual_evapotranspiration"]["folder"] = str(aet_folder_for_balance)
+        variables_config["actual_evapotranspiration"]["pattern"] = aet_pattern_for_balance
+        variables_config["actual_evapotranspiration"]["label"] = "Actual evapotranspiration for balance"
+    elif folder_has_matching_rasters(aet_folder_old, aet_pattern_old):
+        variables_config["actual_evapotranspiration"]["folder"] = str(aet_folder_old)
+        variables_config["actual_evapotranspiration"]["pattern"] = aet_pattern_old
+        variables_config["actual_evapotranspiration"]["label"] = "Actual evapotranspiration"
+    else:
+        # Keep the preferred new path so the later FileNotFoundError is informative.
+        variables_config["actual_evapotranspiration"]["folder"] = str(aet_folder_for_balance)
+        variables_config["actual_evapotranspiration"]["pattern"] = aet_pattern_for_balance
+
     variables_config["deep_percolation"]["folder"] = str(
         debug_base / "deep_percolation"
     )
@@ -507,8 +589,38 @@ def main():
         variables_config=variables_config,
     )
 
+    start_date = pd.to_datetime(args.start_date) if args.start_date else None
+    end_date = pd.to_datetime(args.end_date) if args.end_date else None
+
+    if start_date is not None or end_date is not None:
+        for variable_name, files_df in inventory.items():
+            filtered = files_df.copy()
+            if start_date is not None:
+                filtered = filtered[filtered["date"] >= start_date]
+            if end_date is not None:
+                filtered = filtered[filtered["date"] <= end_date]
+
+            if filtered.empty:
+                raise FileNotFoundError(
+                    f"No files left for variable '{variable_name}' after applying "
+                    f"date filter start={args.start_date}, end={args.end_date}."
+                )
+
+            inventory[variable_name] = filtered.reset_index(drop=True)
+
+    print("Raster inventory:", flush=True)
+    for variable_name, files_df in inventory.items():
+        print(
+            f"  {variable_name}: {len(files_df)} files "
+            f"from {files_df['date'].min().date()} "
+            f"to {files_df['date'].max().date()} "
+            f"| folder={variables_config[variable_name]['folder']} "
+            f"| pattern={variables_config[variable_name]['pattern']}",
+            flush=True,
+        )
+
     raster_crs = read_reference_crs(inventory)
-    print(f"Using raster target CRS: {raster_crs}")
+    print(f"Using raster target CRS: {raster_crs}", flush=True)
 
     points = load_points(
         point_shapefile=args.points,
@@ -516,9 +628,9 @@ def main():
         id_field=args.id_field,
     )
 
-    print(f"Loaded {len(points)} point(s)")
-    print(f"Selected variables: {', '.join(selected_variables)}")
-    print(f"Raster CRS: {raster_crs}")
+    print(f"Loaded {len(points)} point(s)", flush=True)
+    print(f"Selected variables: {', '.join(selected_variables)}", flush=True)
+    print(f"Raster CRS: {raster_crs}", flush=True)
 
     for _, point_row in points.iterrows():
         point_id = point_row["point_id"]
@@ -535,7 +647,7 @@ def main():
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(csv_path, index=False)
 
-        print(f"Written CSV:  {csv_path}")
+        print(f"Written CSV:  {csv_path}", flush=True)
 
         if model_variables:
             model_png_path = plot_dir / f"{safe_id}_timeseries.png"
@@ -549,7 +661,7 @@ def main():
                 plot_title=f"IWR/debug time series - {point_id}",
             )
 
-            print(f"Written model plot: {model_png_path}")
+            print(f"Written model plot: {model_png_path}", flush=True)
 
         if forcing_variables:
             forcing_png_path = plot_dir / f"{safe_id}_forcing_timeseries.png"
@@ -563,7 +675,7 @@ def main():
                 plot_title=f"Forcing time series - {point_id}",
             )
 
-            print(f"Written forcing plot: {forcing_png_path}")
+            print(f"Written forcing plot: {forcing_png_path}", flush=True)
 
 
 if __name__ == "__main__":

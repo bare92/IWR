@@ -4,22 +4,38 @@ import numpy as np
 import rasterio
 
 
-SOIL_PARAMETERS = {
-    1: {"name": "Clay heavy", "wp": 0.39, "fc": 0.54, "fmax": 35},
-    2: {"name": "Silty clay", "wp": 0.32, "fc": 0.50, "fmax": 100},
-    3: {"name": "Clay", "wp": 0.39, "fc": 0.54, "fmax": 35},
-    4: {"name": "Silty clay loam", "wp": 0.23, "fc": 0.44, "fmax": 150},
-    5: {"name": "Clay loam", "wp": 0.23, "fc": 0.39, "fmax": 125},
-    6: {"name": "Silt", "wp": 0.09, "fc": 0.33, "fmax": 500},
-    7: {"name": "Silt loam", "wp": 0.13, "fc": 0.33, "fmax": 575},
-    8: {"name": "Sandy clay", "wp": 0.27, "fc": 0.39, "fmax": 35},
-    9: {"name": "Loam", "wp": 0.15, "fc": 0.31, "fmax": 500},
-    10: {"name": "Sandy clay loam", "wp": 0.20, "fc": 0.32, "fmax": 225},
-    11: {"name": "Sandy loam", "wp": 0.10, "fc": 0.22, "fmax": 1200},
-    12: {"name": "Loamy sand", "wp": 0.08, "fc": 0.16, "fmax": 2200},
-    13: {"name": "Sand", "wp": 0.06, "fc": 0.13, "fmax": 3000},
-}
 
+# SOIL_PARAMETERS = {
+#     1:  {"name": "Clay heavy",       "wp": 0.39, "fc": 0.54, "fmax": 5},
+#     2:  {"name": "Silty clay",       "wp": 0.32, "fc": 0.50, "fmax": 12},
+#     3:  {"name": "Clay",             "wp": 0.39, "fc": 0.54, "fmax": 7},
+#     4:  {"name": "Silty clay loam",  "wp": 0.23, "fc": 0.44, "fmax": 24},
+#     5:  {"name": "Clay loam",        "wp": 0.23, "fc": 0.39, "fmax": 24},
+#     6:  {"name": "Silt",             "wp": 0.09, "fc": 0.33, "fmax": 60},
+#     7:  {"name": "Silt loam",        "wp": 0.13, "fc": 0.33, "fmax": 82},
+#     8:  {"name": "Sandy clay",       "wp": 0.27, "fc": 0.39, "fmax": 14},
+#     9:  {"name": "Loam",             "wp": 0.15, "fc": 0.31, "fmax": 158},
+#     10: {"name": "Sandy clay loam",  "wp": 0.20, "fc": 0.32, "fmax": 36},
+#     11: {"name": "Sandy loam",       "wp": 0.10, "fc": 0.22, "fmax": 262},
+#     12: {"name": "Loamy sand",       "wp": 0.08, "fc": 0.16, "fmax": 500},
+#     13: {"name": "Sand",             "wp": 0.06, "fc": 0.13, "fmax": 720},
+# }
+
+SOIL_PARAMETERS = {
+    1:  {"name": "Clay heavy",       "wp": 0.39, "fc": 0.54, "fmax": 35},
+    2:  {"name": "Silty clay",       "wp": 0.32, "fc": 0.50, "fmax": 100},
+    3:  {"name": "Clay",             "wp": 0.39, "fc": 0.54, "fmax": 35},
+    4:  {"name": "Silty clay loam",  "wp": 0.23, "fc": 0.44, "fmax": 150},
+    5:  {"name": "Clay loam",        "wp": 0.23, "fc": 0.39, "fmax": 125},
+    6:  {"name": "Silt",             "wp": 0.09, "fc": 0.33, "fmax": 500},
+    7:  {"name": "Silt loam",        "wp": 0.13, "fc": 0.33, "fmax": 575},
+    8:  {"name": "Sandy clay",       "wp": 0.27, "fc": 0.39, "fmax": 35},
+    9:  {"name": "Loam",             "wp": 0.15, "fc": 0.31, "fmax": 500},
+    10: {"name": "Sandy clay loam",  "wp": 0.20, "fc": 0.32, "fmax": 225},
+    11: {"name": "Sandy loam",       "wp": 0.10, "fc": 0.22, "fmax": 1200},
+    12: {"name": "Loamy sand",       "wp": 0.08, "fc": 0.16, "fmax": 2200},
+    13: {"name": "Sand",             "wp": 0.06, "fc": 0.13, "fmax": 3000},
+}
 
 def soil_texture_to_arrays(soil_texture, nodata=-9999.0):
     """

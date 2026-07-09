@@ -32,7 +32,12 @@ def main():
     end_date = datetime.strptime(config["end_date"], "%Y-%m-%d")
 
     irrigated_areas_path = Path(config["irrigated_areas_path"])
-    land_cover_fractions_path = Path(config["land_cover_fractions_path"])
+    valid_mask_path = Path(
+        config.get(
+            "valid_mask_path",
+            "/share/data/DAO/static/processed/working_grid_3035_1km_precip_valid.tif",
+        )
+    )
     soil_texture_path = Path(config["soil_texture_path"])
 
     phenology_paths = {
@@ -59,9 +64,13 @@ def main():
         soil_outputs["fmax"]
     )
 
-    iwr_output_folder = Path(config["iwr_output_folder"])
+    output_base = Path(config["output_base"])
+    run_name = config["run_name"]
+    iwr_output_folder = output_base / run_name
+    debug_output_folder = str(output_base / f"{run_name}_debug")
 
     irrigation_mask, irrigation_profile = read_raster(irrigated_areas_path)
+    valid_area_mask, valid_area_profile = read_raster(valid_mask_path)
 
     crop_fraction_path = Path(config["crop_fraction_path"])
     crop_parameters_csv = Path(config["crop_parameters_csv"])
@@ -77,6 +86,8 @@ def main():
         fmax=fmax,
         irrigation_mask=irrigation_mask,
         irrigation_profile=irrigation_profile,
+        valid_area_mask=valid_area_mask,
+        valid_area_profile=valid_area_profile,
         crop_fraction_data=crop_fraction_data,
         crop_profile=crop_profile,
         phenology=phenology,
@@ -88,6 +99,7 @@ def main():
         total_available_water=total_available_water,
         fmax=fmax,
         irrigation_mask=irrigation_mask,
+        valid_area_mask=valid_area_mask,
         crop_fraction_data=crop_fraction_data,
         crop_df=crop_df,
         phenology=phenology,
@@ -101,7 +113,7 @@ def main():
         write_green_blue_outputs=False,
         write_daily_green_blue_outputs=False,
         debug_mode=config.get("debug_mode", False),
-        debug_output_folder=config.get("debug_output_folder", None),
+        debug_output_folder=debug_output_folder,
         max_precipitation_mm_day=config.get("max_precipitation_mm_day", 300),
         max_et0_mm_day=config.get("max_et0_mm_day", 20),
         max_iwr_mm_day=config.get("max_iwr_mm_day", 100),
@@ -112,7 +124,7 @@ def main():
     print("Start date:", start_date)
     print("End date:", end_date)
     print("Irrigated areas:", irrigated_areas_path)
-    print("Land cover fractions:", land_cover_fractions_path)
+    print("Valid mask:", valid_mask_path)
     print("Soil texture:", soil_texture_path)
     print("Phenology:", phenology_paths)
     print("Phenology layers loaded:", list(phenology.keys()))

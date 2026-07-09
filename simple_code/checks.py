@@ -68,7 +68,7 @@ def check_forcing_shape(dataset, variable_name, reference_shape):
         )
 
 
-def check_crop_fractions(crop_fraction_data, tolerance=0.01):
+def check_crop_fractions(crop_fraction_data, tolerance=0.01, nodata=-9999.0):
     """
     Basic check on crop fractions.
 
@@ -76,11 +76,16 @@ def check_crop_fractions(crop_fraction_data, tolerance=0.01):
     normalization expectations before the model run.
     """
 
-    if np.nanmin(crop_fraction_data) < -tolerance:
+    valid_values = crop_fraction_data[
+        np.isfinite(crop_fraction_data) & (crop_fraction_data != nodata)
+    ]
+    if valid_values.size > 0 and float(np.min(valid_values)) < -tolerance:
         raise ValueError("Crop fraction raster contains negative values.")
 
     check_data = np.where(
-        np.isfinite(crop_fraction_data) & (crop_fraction_data > 0),
+        np.isfinite(crop_fraction_data)
+        & (crop_fraction_data != nodata)
+        & (crop_fraction_data > 0),
         crop_fraction_data,
         0.0,
     ).astype(np.float32)
@@ -116,6 +121,8 @@ def run_input_checks(
     crop_fraction_data,
     crop_profile,
     phenology,
+    valid_area_mask=None,
+    valid_area_profile=None,
     precipitation_dataset=None,
     precipitation_variable=None,
     et0_dataset=None,
@@ -130,6 +137,12 @@ def run_input_checks(
 
     check_array_shape("irrigation_mask", irrigation_mask, reference_shape)
     check_profile_match("irrigation_mask", irrigation_profile, reference_profile)
+
+    if valid_area_mask is not None:
+        check_array_shape("valid_area_mask", valid_area_mask, reference_shape)
+
+    if valid_area_profile is not None:
+        check_profile_match("valid_area_mask", valid_area_profile, reference_profile)
 
     check_array_shape("crop_fraction_data", crop_fraction_data, reference_shape)
     check_profile_match("crop_fraction_raster", crop_profile, reference_profile)
@@ -156,6 +169,6 @@ def run_input_checks(
             reference_shape=reference_shape,
         )
 
-    check_crop_fractions(crop_fraction_data)
+    check_crop_fractions(crop_fraction_data, nodata=-9999.0)
 
     print("Input checks passed.")

@@ -31,8 +31,8 @@ import matplotlib.pyplot as plt
 # USER SETTINGS
 # =========================
 
-INPUT_DIR = Path("/share/data/DAO/output/IWR")
-OUTPUT_DIR = Path("/share/data/DAO/output/IWR_plots")
+INPUT_DIR = Path("/share/data/DAO/output_corine_ecm/IWR")
+OUTPUT_DIR = Path("/share/data/DAO/output_corine_ecm/IWR_plots")
 
 # Choose what to plot for annual totals:
 #   "volume_m3" = total water volume over the model domain
@@ -56,6 +56,12 @@ PLOT_AIDA_REFERENCE = True
 AIDA_MASK_FILE = Path(
     "/share/data/DAO/static/processed/"
     "distretti_irrigui_SIGRIAN_3035_1km_mask_aligned.tif"
+)
+
+# Valid precipitation mask on the same working grid:
+# keep only pixels where value == 1
+VALID_PRECIP_MASK_FILE = Path(
+    "/share/data/DAO/static/processed/working_grid_3035_1km_precip_valid.tif"
 )
 
 # If True, negative values are ignored.
@@ -177,7 +183,10 @@ def read_aida_reference_value() -> float | None:
     value, it is masked with:
       distretti_irrigui_SIGRIAN_3035_1km_mask_aligned.tif
 
-    If ANNUAL_PLOT_MODE == "volume_m3":
+        Additionally, analysis is restricted to pixels where:
+            working_grid_3035_1km_precip_valid.tif == 1
+
+        If ANNUAL_PLOT_MODE == "volume_m3":
         returns masked AIDA blue-water IWR [million m3/year]
 
     If ANNUAL_PLOT_MODE == "mean_mm":
@@ -195,44 +204,73 @@ def read_aida_reference_value() -> float | None:
         print(f"WARNING: AIDA mask file not found: {AIDA_MASK_FILE}")
         return None
 
-    with rasterio.open(AIDA_IWR_MM_FILE) as aida_src, rasterio.open(AIDA_MASK_FILE) as mask_src:
+    if not VALID_PRECIP_MASK_FILE.exists():
+        print(f"WARNING: valid precipitation mask file not found: {VALID_PRECIP_MASK_FILE}")
+        return None
 
-        if aida_src.shape != mask_src.shape:
+    with (
+        rasterio.open(AIDA_IWR_MM_FILE) as aida_src,
+        rasterio.open(AIDA_MASK_FILE) as irrig_mask_src,
+        rasterio.open(VALID_PRECIP_MASK_FILE) as precip_valid_src,
+    ):
+
+        if aida_src.shape != irrig_mask_src.shape:
             raise ValueError(
                 "AIDA reference and mask have different shapes:\n"
                 f"  AIDA: {aida_src.shape}\n"
-                f"  Mask: {mask_src.shape}"
+                f"  Irrigation mask: {irrig_mask_src.shape}"
             )
 
-        if aida_src.transform != mask_src.transform:
+        if aida_src.shape != precip_valid_src.shape:
+            raise ValueError(
+                "AIDA reference and precip-valid mask have different shapes:\n"
+                f"  AIDA: {aida_src.shape}\n"
+                f"  Precip-valid mask: {precip_valid_src.shape}"
+            )
+
+        if aida_src.transform != irrig_mask_src.transform:
             raise ValueError(
                 "AIDA reference and mask have different transforms. "
                 "They must be aligned to the same grid."
             )
 
+        if aida_src.transform != precip_valid_src.transform:
+            raise ValueError(
+                "AIDA reference and precip-valid mask have different transforms. "
+                "They must be aligned to the same grid."
+            )
+
         aida = aida_src.read(1).astype("float64")
-        mask = mask_src.read(1).astype("float64")
+        irrig_mask = irrig_mask_src.read(1).astype("float64")
+        precip_valid_mask = precip_valid_src.read(1).astype("float64")
 
         if aida_src.nodata is not None:
             aida[aida == aida_src.nodata] = np.nan
 
-        if mask_src.nodata is not None:
-            mask[mask == mask_src.nodata] = np.nan
+        if irrig_mask_src.nodata is not None:
+            irrig_mask[irrig_mask == irrig_mask_src.nodata] = np.nan
+
+        if precip_valid_src.nodata is not None:
+            precip_valid_mask[precip_valid_mask == precip_valid_src.nodata] = np.nan
 
         aida[~np.isfinite(aida)] = np.nan
-        mask[~np.isfinite(mask)] = np.nan
+        irrig_mask[~np.isfinite(irrig_mask)] = np.nan
+        precip_valid_mask[~np.isfinite(precip_valid_mask)] = np.nan
 
         if IGNORE_NEGATIVE_VALUES:
             aida[aida < 0] = np.nan
 
-        # Apply SIGRIAN mask: keep only pixels inside irrigation districts
-        valid_mask = mask > 0
+        # Keep only pixels inside SIGRIAN irrigation districts and where
+        # precipitation forcing is marked valid (value == 1).
+        valid_mask = (irrig_mask > 0) & (precip_valid_mask == 1)
         aida_masked = np.where(valid_mask, aida, np.nan)
 
         valid_count = np.count_nonzero(np.isfinite(aida_masked))
 
         if valid_count == 0:
-            print("WARNING: no valid AIDA pixels inside the SIGRIAN mask.")
+            print(
+                "WARNING: no valid AIDA pixels inside SIGRIAN mask with precip-valid == 1."
+            )
             return None
 
         if ANNUAL_PLOT_MODE == "mean_mm":

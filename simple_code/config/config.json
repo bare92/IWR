@@ -3,7 +3,7 @@
   "end_date": "2024-12-31",
 
   "irrigated_areas_path": "/share/data/DAO/static/processed/distretti_irrigui_SIGRIAN_3035_1km_mask_aligned.tif",
-  "land_cover_fractions_path": "/share/data/DAO/static/processed/land_cover_aligned.tif",
+  "valid_mask_path": "/share/data/DAO/static/processed/working_grid_3035_1km_precip_valid.tif",
   "soil_texture_path": "/share/data/DAO/static/processed/soil_texture_aligned.tif",
 
   "phenology_paths": {
@@ -18,14 +18,13 @@
     "phenosen2": "/share/data/DAO/static/processed/phenosen2_v04_aligned.tif"
   },
 
-  "precipitation_folder": "/share/data/DAO/input/output_geotiffs/P",
-  "et0_folder": "/share/data/DAO/input/output_geotiffs/PET",
   "precipitation_geotiff_folder": "/share/data/DAO/input/output_geotiffs/P",
   "et0_geotiff_folder": "/share/data/DAO/input/output_geotiffs/PET",
 
   "soil_output_folder": "/share/data/DAO/static/processed/soil_parameters",
 
-  "iwr_output_folder": "/share/data/DAO/output/IWR",
+  "output_base": "/share/data/DAO/output_corine_ecm",
+  "run_name": "IWR",
 
   "crop_fraction_path": "/share/data/DAO/static/processed/land_cover_aligned.tif",
   "crop_parameters_csv": "/share/data/DAO/static/processed/crop_parameters_11crops.csv",
@@ -33,10 +32,7 @@
   "strict_checks": true,
   "write_debug_csv": true,
   "write_cumulative_iwr": true,
-  "write_green_blue_outputs": true,
-  "write_daily_green_blue_outputs": true,
   "debug_mode": true,
-  "debug_output_folder": "/share/data/DAO/output/IWR_debug",
   "max_precipitation_mm_day": 350,
   "max_et0_mm_day": 20,
   "max_iwr_mm_day": 100,

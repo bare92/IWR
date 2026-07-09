@@ -187,15 +187,21 @@ def create_raw_pixel(
     nodata=-9999.0,
 ):
     """
-    Create one RAW value per pixel.
+    Create one storage threshold value per pixel (returned as raw for backward compatibility).
 
     total_available_water input is:
         FC - WP, in m3/m3
 
-    For multiple crops in one pixel:
-        RAW_mm = (FC - WP) * 1000 *
-                 [sum(crop_fraction_i * root_depth_i * p_i)
-                  / sum(crop_fraction_i)]
+    For multiple crops in one pixel, compute the storage-equivalent threshold:
+        RAW_storage_threshold_mm = (FC - WP) * 1000 *
+                                   [sum(crop_fraction_i * root_depth_i * (1 - p_i))
+                                    / sum(crop_fraction_i)]
+
+    In FAO-56, p is a depletion fraction and RAW_depletion = p * TAW.
+    This model uses S as available water storage, not depletion.
+    Since depletion Dr = TAW - S, the equivalent storage threshold is:
+        S_threshold = TAW - RAW_depletion = (1 - p) * TAW.
+    Therefore the stress threshold used by the model is (1 - p) * TAW.
 
     This avoids diluting RAW by non-crop or empty pixel fractions.
 
@@ -206,7 +212,7 @@ def create_raw_pixel(
     root_depths = crop_df["root_depth_max_m"].to_numpy(dtype=np.float32)
     depletion_factors = crop_df["p"].to_numpy(dtype=np.float32)
 
-    weighted_root_depth_p_sum = np.zeros(
+    weighted_root_depth_storage_threshold_sum = np.zeros(
         crop_fraction_data.shape[1:],
         dtype=np.float32,
     )
@@ -219,24 +225,28 @@ def create_raw_pixel(
     for crop_index, (root_depth, p) in enumerate(zip(root_depths, depletion_factors)):
         crop_fraction = crop_fraction_data[crop_index, :, :]
 
-        weighted_root_depth_p_sum += crop_fraction * root_depth * p
+        storage_threshold_factor = 1.0 - p
+
+        weighted_root_depth_storage_threshold_sum += (
+            crop_fraction * root_depth * storage_threshold_factor
+        )
         crop_fraction_sum += crop_fraction
 
-    effective_root_depth_p = np.zeros(
+    effective_root_depth_storage_threshold = np.zeros(
         crop_fraction_data.shape[1:],
         dtype=np.float32,
     )
 
     valid_crop_pixels = crop_fraction_sum > 0
 
-    effective_root_depth_p[valid_crop_pixels] = (
-        weighted_root_depth_p_sum[valid_crop_pixels]
+    effective_root_depth_storage_threshold[valid_crop_pixels] = (
+        weighted_root_depth_storage_threshold_sum[valid_crop_pixels]
         / crop_fraction_sum[valid_crop_pixels]
     )
 
     raw_pixel = (
         total_available_water
-        * effective_root_depth_p
+        * effective_root_depth_storage_threshold
         * 1000.0
     ).astype(np.float32)
 
@@ -297,7 +307,7 @@ def create_kc_pixel(
         kc_crop[phenology_status == PHENOLOGY_GROWING] = kc_ini
         kc_crop[phenology_status == PHENOLOGY_MAXIMUM] = kc_mid
         kc_crop[phenology_status == PHENOLOGY_SENESCENCE] = kc_end
-        kc_crop[phenology_status == PHENOLOGY_INACTIVE] = 0.0
+        kc_crop[phenology_status == PHENOLOGY_INACTIVE] = 0.5
 
         kc_weighted_sum += crop_fraction * kc_crop
 
@@ -538,7 +548,6 @@ def compute_subsurface_runoff(
     precipitation_effective,
     actual_evapotranspiration,
     deep_percolation,
-    irrigation,
     total_available_water_pixel,
     nodata=-9999.0,
     valid_mask=None,
@@ -547,10 +556,14 @@ def compute_subsurface_runoff(
     Compute one runoff value per pixel.
 
     If:
-        S_prev + Peff - ETa - D + I > TAW
+        S_prev + Peff - ETa - D > TAW
 
     then:
         R = balance - TAW
+
+    In the WATNEEDS-style green/blue decomposition used here, irrigation is not
+    added to the runoff balance because blue water is assumed to satisfy the ET
+    deficit on the same day and does not create residual soil storage.
 
     If valid_mask is provided, output is nodata outside valid_mask.
     """
@@ -563,7 +576,6 @@ def compute_subsurface_runoff(
         & (precipitation_effective != nodata)
         & (actual_evapotranspiration != nodata)
         & (deep_percolation != nodata)
-        & (irrigation != nodata)
     )
     if valid_mask is not None:
         active_mask = active_mask & valid_mask
@@ -575,7 +587,6 @@ def compute_subsurface_runoff(
         + precipitation_effective[active_mask]
         - actual_evapotranspiration[active_mask]
         - deep_percolation[active_mask]
-        + irrigation[active_mask]
     )
     runoff[active_mask] = np.maximum(
         balance - total_available_water_pixel[active_mask],
@@ -899,6 +910,7 @@ def run_iwr_model(
     total_available_water,
     fmax,
     irrigation_mask,
+    valid_area_mask,
     crop_fraction_data,
     crop_df,
     phenology,
@@ -938,6 +950,7 @@ def run_iwr_model(
     - R is computed when storage exceeds TAW.
     - nodata is propagated safely; no arithmetic on -9999 values.
     - Daily irrigation maps are written as GeoTIFFs if output_folder is provided.
+    - Computation is restricted to valid_area_mask == 1.
     """
 
     crop_fraction_data, crop_fraction_sum = prepare_crop_fractions(
@@ -958,7 +971,30 @@ def run_iwr_model(
         nodata=nodata,
     )
 
+    # Despite the historical variable name "raw", this array is used as a
+    # storage threshold in the S-based water balance.
+    # Since crop_df["p"] is the FAO depletion fraction, the storage threshold is:
+    #     S_threshold = (1 - p) * TAW
+    # not:
+    #     p * TAW
+
     fmax_pixel = fmax
+
+    # Diagnostic: compute raw as a fraction of TAW for validation
+    raw_fraction_of_taw = np.full_like(raw, nodata, dtype=np.float32)
+
+    raw_fraction_mask = (
+        np.isfinite(raw)
+        & np.isfinite(total_available_water_pixel)
+        & (raw != nodata)
+        & (total_available_water_pixel != nodata)
+        & (total_available_water_pixel > 0)
+    )
+
+    raw_fraction_of_taw[raw_fraction_mask] = (
+        raw[raw_fraction_mask]
+        / total_available_water_pixel[raw_fraction_mask]
+    ).astype(np.float32)
 
     soil_moisture = initialize_soil_moisture(
         total_available_water_pixel=total_available_water_pixel,
@@ -966,7 +1002,9 @@ def run_iwr_model(
         nodata=nodata,
     )
 
-    irrigated_pixels = irrigation_mask == 1
+    valid_area_pixels = np.isfinite(valid_area_mask) & (valid_area_mask == 1)
+
+    irrigated_pixels = (irrigation_mask == 1) & valid_area_pixels
 
     cumulative_irrigation = np.zeros_like(soil_moisture, dtype=np.float32)
     soil_moisture_green = soil_moisture.copy()
@@ -980,7 +1018,7 @@ def run_iwr_model(
     cumulative_green_runoff = np.zeros_like(soil_moisture, dtype=np.float32)
     cumulative_blue_runoff = np.zeros_like(soil_moisture, dtype=np.float32)
 
-    static_valid_mask = soil_moisture != nodata
+    static_valid_mask = (soil_moisture != nodata) & valid_area_pixels
     daily_stats_rows = []
 
     # Pre-compute TAW max for soil_moisture sanity check.
@@ -1036,6 +1074,7 @@ def run_iwr_model(
 
         model_valid_mask = (
             forcing_valid_mask
+            & valid_area_pixels
             & (soil_moisture != nodata)
             & (total_available_water_pixel != nodata)
             & (raw != nodata)
@@ -1245,12 +1284,40 @@ def run_iwr_model(
         # ------------------------------------------------------------------ #
         # 11. Runoff and soil moisture update                                  #
         # ------------------------------------------------------------------ #
+        runoff_balance_before_threshold = np.full_like(soil_moisture, nodata, dtype=np.float32)
+        runoff_excess_before_threshold = np.full_like(soil_moisture, nodata, dtype=np.float32)
+
+        runoff_balance_mask = (
+            model_valid_mask
+            & np.isfinite(soil_moisture)
+            & np.isfinite(precipitation_effective)
+            & np.isfinite(actual_evapotranspiration_for_balance)
+            & np.isfinite(deep_percolation)
+            & np.isfinite(total_available_water_pixel)
+            & (soil_moisture != nodata)
+            & (precipitation_effective != nodata)
+            & (actual_evapotranspiration_for_balance != nodata)
+            & (deep_percolation != nodata)
+            & (total_available_water_pixel != nodata)
+        )
+
+        runoff_balance_before_threshold[runoff_balance_mask] = (
+            soil_moisture[runoff_balance_mask]
+            + precipitation_effective[runoff_balance_mask]
+            - actual_evapotranspiration_for_balance[runoff_balance_mask]
+            - deep_percolation[runoff_balance_mask]
+        ).astype(np.float32)
+
+        runoff_excess_before_threshold[runoff_balance_mask] = (
+            runoff_balance_before_threshold[runoff_balance_mask]
+            - total_available_water_pixel[runoff_balance_mask]
+        ).astype(np.float32)
+
         runoff = compute_subsurface_runoff(
             soil_moisture_previous=soil_moisture,
             precipitation_effective=precipitation_effective,
             actual_evapotranspiration=actual_evapotranspiration_for_balance,
             deep_percolation=deep_percolation,
-            irrigation=irrigation,
             total_available_water_pixel=total_available_water_pixel,
             nodata=nodata,
             valid_mask=model_valid_mask,
@@ -1367,9 +1434,27 @@ def run_iwr_model(
                     "mm/day",
                 ),
                 (
+                    "runoff_balance_before_threshold",
+                    runoff_balance_before_threshold,
+                    "runoff_balance_before_threshold",
+                    "mm",
+                ),
+                (
+                    "runoff_excess_before_threshold",
+                    runoff_excess_before_threshold,
+                    "runoff_excess_before_threshold",
+                    "mm",
+                ),
+                (
                     "soil_saturation",
                     soil_saturation,
                     "soil_saturation",
+                    "fraction",
+                ),
+                (
+                    "raw_fraction_of_taw",
+                    raw_fraction_of_taw,
+                    "raw_fraction_of_taw",
                     "fraction",
                 ),
             ]
