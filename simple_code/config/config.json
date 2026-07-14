@@ -23,11 +23,11 @@
 
   "soil_output_folder": "/share/data/DAO/static/processed/soil_parameters",
 
-  "output_base": "/share/data/DAO/output_corine_ecm",
+  "output_base": "/share/data/DAO/output_aida_ir_rf",
   "run_name": "IWR",
 
-  "crop_fraction_path": "/share/data/DAO/static/processed/land_cover_aligned.tif",
-  "crop_parameters_csv": "/share/data/DAO/static/processed/crop_parameters_11crops.csv",
+  "crop_fraction_path": "/share/data/DAO/AIDA/italy_areas_irr_rainfed_DAO_1km_clipped_bilinear.tif",
+  "crop_parameters_csv": "/share/data/DAO/static/processed/crop_parameters_aida_irr_rf.csv",
 
   "strict_checks": true,
   "write_debug_csv": true,

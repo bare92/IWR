@@ -49,7 +49,7 @@ from rasterio.warp import reproject, Resampling
 RAINFED_PATH = Path("/share/data/DAO/AIDA/italy_areas_rainfed.tif")
 
 REFERENCE_IRRIGATED_PATH = Path(
-    "/share/data/DAO/AIDA/italy_areas_irrigated_DAO_1km.tif"
+    "/share/data/DAO/AIDA/italy_areas_irrigated_DAO_1km_clipped.tif"
 )
 
 OUTPUT_DIR = Path("/share/data/DAO/AIDA/")

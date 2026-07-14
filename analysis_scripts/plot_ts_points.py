@@ -32,35 +32,35 @@ import matplotlib.pyplot as plt
 
 DEFAULT_VARIABLES = {
     "iwr": {
-        "folder": "/share/data/DAO/output/IWR",
+        "folder": "/share/data/DAO/output_aida/IWR",
         "pattern": "iwr_*.tif",
         "label": "IWR",
         "units": "mm/day",
         "group": "model",
     },
     "actual_evapotranspiration": {
-        "folder": "/share/data/DAO/output/IWR_debug/actual_evapotranspiration_for_balance",
+        "folder": "/share/data/DAO/output_aida/IWR_debug/actual_evapotranspiration_for_balance",
         "pattern": "actual_evapotranspiration_for_balance_*.tif",
         "label": "Actual evapotranspiration for balance",
         "units": "mm/day",
         "group": "model",
     },
     "deep_percolation": {
-        "folder": "/share/data/DAO/output/IWR_debug/deep_percolation",
+        "folder": "/share/data/DAO/output_aida/IWR_debug/deep_percolation",
         "pattern": "deep_percolation_*.tif",
         "label": "Deep percolation",
         "units": "mm/day",
         "group": "model",
     },
     "runoff": {
-        "folder": "/share/data/DAO/output/IWR_debug/runoff",
+        "folder": "/share/data/DAO/output_aida/IWR_debug/runoff",
         "pattern": "runoff_*.tif",
         "label": "Runoff",
         "units": "mm/day",
         "group": "model",
     },
     "soil_saturation": {
-        "folder": "/share/data/DAO/output/IWR_debug/soil_saturation",
+        "folder": "/share/data/DAO/output_aida/IWR_debug/soil_saturation",
         "pattern": "soil_saturation_*.tif",
         "label": "Soil saturation",
         "units": "fraction",
@@ -92,7 +92,7 @@ DEFAULT_VARIABLES = {
 RUN_CONFIG = {
     # Required inputs
     "points": "/share/data/DAO/auxiliary/shapefile_checks/point_check_crops.shp",  # e.g. "/path/to/points.shp"
-    "out_dir": "/share/data/DAO/output/IWR_plot_point_ts",
+    "out_dir": "/share/data/DAO/output_aida/IWR_plot_point_ts",
 
     # Optional runtime controls
     "variables": [
@@ -108,7 +108,7 @@ RUN_CONFIG = {
 
     # Data folders
     "iwr_folder": DEFAULT_VARIABLES["iwr"]["folder"],
-    "debug_folder": "/share/data/DAO/output/IWR_debug",
+    "debug_folder": "/share/data/DAO/output_aida/IWR_debug",
     "precipitation_folder": DEFAULT_VARIABLES["precipitation"]["folder"],
     "et0_folder": DEFAULT_VARIABLES["et0"]["folder"],
 }

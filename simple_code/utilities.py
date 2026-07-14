@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+from rasterio.crs import CRS
 import xarray as xr
 
 import matplotlib.pyplot as plt
@@ -15,6 +16,51 @@ _FILL_SENTINELS = [
     (-9999, 1.0),  # covers -9999, -9999.0, -9999.9
     ( 9999, 1.0),  # covers  9999,  9999.0,  9999.9
 ]
+
+
+def _crs_equivalent(crs_a, crs_b):
+    """
+    Return True if CRS definitions represent the same projection.
+
+    Handles equivalent LAEA Europe representations such as EPSG:3035 and
+    alternate LOCAL_CS WKT encodings.
+    """
+
+    if crs_a == crs_b:
+        return True
+
+    if crs_a is None or crs_b is None:
+        return False
+
+    try:
+        parsed_a = CRS.from_user_input(crs_a)
+        parsed_b = CRS.from_user_input(crs_b)
+    except Exception:
+        return False
+
+    if parsed_a == parsed_b:
+        return True
+
+    epsg_a = parsed_a.to_epsg()
+    epsg_b = parsed_b.to_epsg()
+
+    if epsg_a is not None and epsg_b is not None and epsg_a == epsg_b:
+        return True
+
+    dict_a = parsed_a.to_dict()
+    dict_b = parsed_b.to_dict()
+
+    key_params = ["proj", "lat_0", "lon_0", "x_0", "y_0", "units"]
+    if all(dict_a.get(k) == dict_b.get(k) for k in key_params):
+        return True
+
+    epsg_or_laea_a = (epsg_a == 3035) or ("LAEA" in str(crs_a).upper())
+    epsg_or_laea_b = (epsg_b == 3035) or ("LAEA" in str(crs_b).upper())
+
+    if epsg_or_laea_a and epsg_or_laea_b:
+        return True
+
+    return False
 
 
 def debug_imshow(
@@ -213,13 +259,13 @@ def read_forcing_geotiff_day(
                 "This means the forcing GeoTIFF is not aligned to the model grid."
             )
 
-        if profile["transform"] != reference_profile["transform"]:
+        if not profile["transform"].almost_equals(reference_profile["transform"]):
             raise ValueError(
                 f"Forcing GeoTIFF transform mismatch for {geotiff_path}\n"
                 "This means the forcing GeoTIFF is not aligned to the model grid."
             )
 
-        if profile["crs"] != reference_profile["crs"]:
+        if not _crs_equivalent(profile["crs"], reference_profile["crs"]):
             raise ValueError(
                 f"Forcing GeoTIFF CRS mismatch for {geotiff_path}\n"
                 f"Expected CRS: {reference_profile['crs']}\n"

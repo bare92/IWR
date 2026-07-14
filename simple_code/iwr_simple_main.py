@@ -1,6 +1,14 @@
 import json
+import os
 from pathlib import Path
 from datetime import datetime
+
+
+# Prevent cross-environment PROJ database conflicts (e.g. active conda env + .venv python).
+for _proj_var in ("PROJ_LIB", "PROJ_DATA"):
+    _proj_path = os.environ.get(_proj_var)
+    if _proj_path and "miniconda3/envs/" in _proj_path:
+        os.environ.pop(_proj_var, None)
 
 import rasterio
 
@@ -32,12 +40,7 @@ def main():
     end_date = datetime.strptime(config["end_date"], "%Y-%m-%d")
 
     irrigated_areas_path = Path(config["irrigated_areas_path"])
-    valid_mask_path = Path(
-        config.get(
-            "valid_mask_path",
-            "/share/data/DAO/static/processed/working_grid_3035_1km_precip_valid.tif",
-        )
-    )
+    valid_mask_path = Path(config["valid_mask_path"])
     soil_texture_path = Path(config["soil_texture_path"])
 
     phenology_paths = {
