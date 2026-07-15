@@ -443,9 +443,11 @@ def compute_forcing_and_demand_diagnostics(
             nodata=-9999,
         )
         kc_pixel = create_kc_pixel(
-            phenology_status=phenology_status,
+            current_date=current,
+            phenology=phenology,
             crop_fraction_data=crop_fraction_data_prepared,
             crop_df=crop_df,
+            nodata=-9999.0,
         )
 
         # --- Model-valid mask ---

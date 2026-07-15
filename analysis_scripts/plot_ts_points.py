@@ -45,6 +45,13 @@ DEFAULT_VARIABLES = {
         "units": "mm/day",
         "group": "model",
     },
+    "kc_pixel": {
+        "folder": "/share/data/DAO/output_aida_dynamic_Kc/IWR_debug/kc_pixel",
+        "pattern": "kc_pixel_*.tif",
+        "label": "Crop coefficient",
+        "units": "-",
+        "group": "overlay",
+    },
     "deep_percolation": {
         "folder": "/share/data/DAO/output_aida/IWR_debug/deep_percolation",
         "pattern": "deep_percolation_*.tif",
@@ -92,12 +99,13 @@ DEFAULT_VARIABLES = {
 RUN_CONFIG = {
     # Required inputs
     "points": "/share/data/DAO/auxiliary/shapefile_checks/point_check_crops.shp",  # e.g. "/path/to/points.shp"
-    "out_dir": "/share/data/DAO/output_aida/IWR_plot_point_ts",
+    "out_dir": "/share/data/DAO/output_aida_dynamic_Kc/IWR_plot_point_ts",
 
     # Optional runtime controls
     "variables": [
         "iwr",
         "actual_evapotranspiration",
+        "kc_pixel",
         "deep_percolation",
         "runoff",
         "soil_saturation",
@@ -108,7 +116,7 @@ RUN_CONFIG = {
 
     # Data folders
     "iwr_folder": DEFAULT_VARIABLES["iwr"]["folder"],
-    "debug_folder": "/share/data/DAO/output_aida/IWR_debug",
+    "debug_folder": "/share/data/DAO/output_aida_dynamic_Kc/IWR_debug",
     "precipitation_folder": DEFAULT_VARIABLES["precipitation"]["folder"],
     "et0_folder": DEFAULT_VARIABLES["et0"]["folder"],
 }
@@ -378,20 +386,23 @@ def extract_timeseries_for_point(point_row, inventory, variables_config):
 
 def split_variables_by_group(selected_variables, variables_config):
     """
-    Split selected variables into model/debug variables and forcing variables.
+    Split selected variables into model, forcing and overlay variables.
     """
     model_variables = []
     forcing_variables = []
+    overlay_variables = []
 
     for variable_name in selected_variables:
         group = variables_config[variable_name].get("group", "model")
 
         if group == "forcing":
             forcing_variables.append(variable_name)
+        elif group == "overlay":
+            overlay_variables.append(variable_name)
         else:
             model_variables.append(variable_name)
 
-    return model_variables, forcing_variables
+    return model_variables, forcing_variables, overlay_variables
 
 
 def plot_timeseries_for_point(
@@ -401,10 +412,14 @@ def plot_timeseries_for_point(
     variables_config,
     output_png,
     plot_title=None,
+    overlay_variables=None,
 ):
     """
     Make one plot with one subplot per variable.
     """
+    if overlay_variables is None:
+        overlay_variables = []
+
     n_vars = len(selected_variables)
 
     fig, axes = plt.subplots(
@@ -423,9 +438,50 @@ def plot_timeseries_for_point(
 
         if variable_name == "precipitation":
             ax.bar(df["date"], df[variable_name], width=1.0)
+            ax.set_ylabel(f"{label}\n({units})")
         else:
-            ax.plot(df["date"], df[variable_name], linewidth=1.4)
-        ax.set_ylabel(f"{label}\n({units})")
+            main_line = ax.plot(
+                df["date"],
+                df[variable_name],
+                linewidth=1.4,
+                label=label,
+            )[0]
+            ax.set_ylabel(f"{label}\n({units})")
+
+            if (
+                variable_name == "actual_evapotranspiration"
+                and "kc_pixel" in overlay_variables
+                and "kc_pixel" in df.columns
+            ):
+                kc_series = df["kc_pixel"]
+                if kc_series.notna().any():
+                    kc_label = variables_config["kc_pixel"]["label"]
+                    kc_units = variables_config["kc_pixel"]["units"]
+
+                    ax_kc = ax.twinx()
+                    kc_line = ax_kc.plot(
+                        df["date"],
+                        kc_series,
+                        linestyle="--",
+                        linewidth=1.2,
+                        color="tab:orange",
+                        label=kc_label,
+                    )[0]
+                    ax_kc.set_ylabel(f"{kc_label}\n({kc_units})")
+                    ax_kc.set_ylim(bottom=0.0)
+
+                    ax.legend(
+                        handles=[main_line, kc_line],
+                        labels=[label, kc_label],
+                        loc="upper right",
+                    )
+                else:
+                    print(
+                        f"Warning: no valid Kc values for point {point_id}; "
+                        "Kc overlay skipped.",
+                        flush=True,
+                    )
+
         ax.grid(True, linewidth=0.4, alpha=0.5)
 
     axes[-1].set_xlabel("Date")
@@ -569,6 +625,10 @@ def main():
     variables_config["deep_percolation"]["folder"] = str(
         debug_base / "deep_percolation"
     )
+    variables_config["kc_pixel"]["folder"] = str(
+        debug_base / "kc_pixel"
+    )
+    variables_config["kc_pixel"]["pattern"] = "kc_pixel_*.tif"
     variables_config["runoff"]["folder"] = str(
         debug_base / "runoff"
     )
@@ -579,7 +639,7 @@ def main():
     variables_config["et0"]["folder"] = args.et0_folder
 
     selected_variables = args.variables
-    model_variables, forcing_variables = split_variables_by_group(
+    model_variables, forcing_variables, overlay_variables = split_variables_by_group(
         selected_variables=selected_variables,
         variables_config=variables_config,
     )
@@ -659,6 +719,7 @@ def main():
                 variables_config=variables_config,
                 output_png=model_png_path,
                 plot_title=f"IWR/debug time series - {point_id}",
+                overlay_variables=overlay_variables,
             )
 
             print(f"Written model plot: {model_png_path}", flush=True)
@@ -673,6 +734,7 @@ def main():
                 variables_config=variables_config,
                 output_png=forcing_png_path,
                 plot_title=f"Forcing time series - {point_id}",
+                overlay_variables=[],
             )
 
             print(f"Written forcing plot: {forcing_png_path}", flush=True)

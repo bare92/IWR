@@ -9,10 +9,7 @@ import rasterio
 from utilities import array_stats, assert_reasonable_range, read_forcing_geotiff_day, debug_imshow
 from phenology_functions import (
     create_phenology_status_mask_from_date,
-    PHENOLOGY_INACTIVE,
-    PHENOLOGY_GROWING,
-    PHENOLOGY_MAXIMUM,
-    PHENOLOGY_SENESCENCE,
+    create_dynamic_kc_curve_from_date,
 )
 
 
@@ -276,44 +273,44 @@ def initialize_soil_moisture(
 
 
 def create_kc_pixel(
-    phenology_status,
+    current_date,
+    phenology,
     crop_fraction_data,
     crop_df,
+    nodata=-9999.0,
 ):
     """
     Create one crop coefficient per pixel using cropped-area convention.
 
     Kc_pixel = sum(crop_fraction_i * Kc_i) / sum(crop_fraction_i)
 
-    This returns the average Kc over the cropped fraction of the pixel,
-    not a full-pixel-equivalent Kc.
-
-    Output unit:
-        dimensionless
+    Kc_i is a continuous FAO-56-style daily curve for each crop.
+    Output unit: dimensionless
     """
-
-    kc_weighted_sum = np.zeros(phenology_status.shape, dtype=np.float32)
+    shape = crop_fraction_data.shape[1:]
+    kc_weighted_sum = np.zeros(shape, dtype=np.float32)
     crop_fraction_sum = np.sum(crop_fraction_data, axis=0).astype(np.float32)
 
     for crop_index in range(crop_fraction_data.shape[0]):
         crop_fraction = crop_fraction_data[crop_index, :, :]
+        kc_ini = float(crop_df.iloc[crop_index]["Kc_ini"])
+        kc_mid = float(crop_df.iloc[crop_index]["Kc_mid"])
+        kc_end = float(crop_df.iloc[crop_index]["Kc_end"])
 
-        kc_ini = crop_df.iloc[crop_index]["Kc_ini"]
-        kc_mid = crop_df.iloc[crop_index]["Kc_mid"]
-        kc_end = crop_df.iloc[crop_index]["Kc_end"]
-
-        kc_crop = np.zeros(phenology_status.shape, dtype=np.float32)
-
-        kc_crop[phenology_status == PHENOLOGY_GROWING] = kc_ini
-        kc_crop[phenology_status == PHENOLOGY_MAXIMUM] = kc_mid
-        kc_crop[phenology_status == PHENOLOGY_SENESCENCE] = kc_end
-        kc_crop[phenology_status == PHENOLOGY_INACTIVE] = 0.5
+        kc_crop = create_dynamic_kc_curve_from_date(
+            current_date=current_date,
+            phenology=phenology,
+            kc_ini=kc_ini,
+            kc_mid=kc_mid,
+            kc_end=kc_end,
+            nodata=nodata,
+            inactive_kc=0.0,
+        )
 
         kc_weighted_sum += crop_fraction * kc_crop
 
-    kc_pixel = np.zeros_like(kc_weighted_sum, dtype=np.float32)
+    kc_pixel = np.zeros(shape, dtype=np.float32)
     valid = crop_fraction_sum > 0
-
     kc_pixel[valid] = kc_weighted_sum[valid] / crop_fraction_sum[valid]
 
     return kc_pixel.astype(np.float32)
@@ -1092,9 +1089,11 @@ def run_iwr_model(
         )
 
         kc_pixel = create_kc_pixel(
-            phenology_status=phenology_status,
+            current_date=current_date,
+            phenology=phenology,
             crop_fraction_data=crop_fraction_data,
             crop_df=crop_df,
+            nodata=nodata,
         )
         # Kc is undefined outside valid mask; zero outside is safe.
         kc_pixel[~model_valid_mask] = 0.0
@@ -1415,6 +1414,12 @@ def run_iwr_model(
                 debug_base_folder = Path(debug_output_folder)
 
             debug_outputs = [
+                (
+                    "kc_pixel",
+                    kc_pixel,
+                    "kc_pixel",
+                    "dimensionless",
+                ),
                 (
                     "actual_evapotranspiration_for_balance",
                     actual_evapotranspiration_for_balance,

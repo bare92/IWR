@@ -1,3 +1,4 @@
+import calendar
 from pathlib import Path
 
 import numpy as np
@@ -62,6 +63,31 @@ def date_to_dekad(date):
         dekad_in_month = 3
 
     return (month - 1) * 3 + dekad_in_month
+
+
+def date_to_continuous_dekad(current_date):
+    """
+    Return the ASAP dekad position as a float with intra-dekad resolution.
+
+    The first day of each dekad maps to the integer dekad value.
+    Later days produce a fractional value between the current and next dekad.
+    """
+    month = current_date.month
+    day = current_date.day
+    days_in_month = calendar.monthrange(current_date.year, month)[1]
+
+    if day <= 10:
+        first_day = 1
+        dekad_length = 10
+    elif day <= 20:
+        first_day = 11
+        dekad_length = 10
+    else:
+        first_day = 21
+        dekad_length = days_in_month - 20
+
+    fraction = (day - first_day) / dekad_length
+    return float(date_to_dekad(current_date) + fraction)
 
 
 def load_phenology_layers(phenology_paths):
@@ -210,3 +236,130 @@ def create_phenology_status_mask_from_date(
         phenology=phenology,
         nodata=nodata,
     )
+
+
+def _calculate_dynamic_kc_for_one_season(
+    current_dekad_position,
+    sos,
+    tom,
+    sen,
+    eos,
+    valid_mask,
+    kc_ini,
+    kc_mid,
+    kc_end,
+):
+    """
+    Compute a continuous FAO-56-style Kc curve for one growing season.
+
+    Uses the extended 1-108 dekad calendar: position is tested at
+    d, d+36 and d+72 to cover all three possible calendar placements.
+
+    Returns
+    -------
+    kc : float32 array
+    season_active : bool array  (True where this season is currently active)
+    """
+    sos = sos.astype(np.float32)
+    tom = tom.astype(np.float32)
+    sen = sen.astype(np.float32)
+    eos = eos.astype(np.float32)
+
+    kc = np.zeros(sos.shape, dtype=np.float32)
+    season_active = np.zeros(sos.shape, dtype=bool)
+
+    stage_valid = (
+        valid_mask
+        & (sos <= tom)
+        & (tom <= sen)
+        & (sen <= eos)
+    )
+
+    for offset in (0, 36, 72):
+        pos = float(current_dekad_position) + offset
+
+        active = stage_valid & (pos >= sos) & (pos < eos + 1)
+
+        dev_mask = active & (pos >= sos) & (pos < tom)
+        dev_len = np.maximum(tom - sos, 1e-6)
+        dev_progress = np.clip((pos - sos) / dev_len, 0.0, 1.0)
+        kc[dev_mask] = (kc_ini + dev_progress * (kc_mid - kc_ini)).astype(np.float32)[dev_mask]
+
+        mid_mask = active & (pos >= tom) & (pos < sen)
+        kc[mid_mask] = np.float32(kc_mid)
+
+        late_mask = active & (pos >= sen) & (pos < eos + 1)
+        late_len = np.maximum((eos + 1) - sen, 1e-6)
+        late_progress = np.clip((pos - sen) / late_len, 0.0, 1.0)
+        kc[late_mask] = (kc_mid + late_progress * (kc_end - kc_mid)).astype(np.float32)[late_mask]
+
+        season_active |= active
+
+    return kc.astype(np.float32), season_active
+
+
+def create_dynamic_kc_curve_from_date(
+    current_date,
+    phenology,
+    kc_ini,
+    kc_mid,
+    kc_end,
+    nodata=-9999,
+    inactive_kc=0.0,
+):
+    """
+    Compute a continuous FAO-56-style Kc raster for current_date.
+
+    Processes up to two growing seasons per pixel. Where two seasons
+    overlap, the maximum active Kc is kept. Pixels outside all active
+    seasons receive inactive_kc. Returns float32.
+    """
+    pos = date_to_continuous_dekad(current_date)
+    nseasons = phenology["phenonseasons"].astype(np.float32)
+    shape = nseasons.shape
+
+    base_valid = np.isfinite(nseasons) & (nseasons != nodata)
+
+    kc = np.full(shape, inactive_kc, dtype=np.float32)
+    any_active = np.zeros(shape, dtype=bool)
+
+    for season_num in (1, 2):
+        suffix = str(season_num)
+        season_mask = base_valid & (nseasons >= season_num)
+
+        sos_arr = phenology[f"phenos{suffix}"].astype(np.float32)
+        tom_arr = phenology[f"phenom{suffix}"].astype(np.float32)
+        sen_arr = phenology[f"phenosen{suffix}"].astype(np.float32)
+        eos_arr = phenology[f"phenoe{suffix}"].astype(np.float32)
+
+        valid = (
+            season_mask
+            & np.isfinite(sos_arr) & (sos_arr != nodata)
+            & np.isfinite(tom_arr) & (tom_arr != nodata)
+            & np.isfinite(sen_arr) & (sen_arr != nodata)
+            & np.isfinite(eos_arr) & (eos_arr != nodata)
+            & (sos_arr <= tom_arr)
+            & (tom_arr <= sen_arr)
+            & (sen_arr <= eos_arr)
+        )
+
+        kc_season, active = _calculate_dynamic_kc_for_one_season(
+            current_dekad_position=pos,
+            sos=sos_arr,
+            tom=tom_arr,
+            sen=sen_arr,
+            eos=eos_arr,
+            valid_mask=valid,
+            kc_ini=kc_ini,
+            kc_mid=kc_mid,
+            kc_end=kc_end,
+        )
+
+        new_only = (~any_active) & active
+        overlap = any_active & active
+
+        kc[new_only] = kc_season[new_only]
+        kc[overlap] = np.maximum(kc[overlap], kc_season[overlap])
+        any_active |= active
+
+    return kc.astype(np.float32)
