@@ -12,6 +12,7 @@ import pandas as pd
 import rasterio
 from rasterio.crs import CRS
 from rasterio.transform import Affine, from_origin
+from rasterio.warp import Resampling, reproject
 import xarray as xr
 
 
@@ -21,17 +22,22 @@ import xarray as xr
 
 # Folder containing monthly precipitation NetCDF files.
 P_NETCDF_FOLDER = Path(
-    "/share/data/DAO/input/monthly_netcdf/P"
+    "/share/data/DAO/input/Forcing_micromet_corrected/P"
 )
 
 # Folder containing monthly potential evapotranspiration NetCDF files.
 PET_NETCDF_FOLDER = Path(
-    "/share/data/DAO/input/monthly_netcdf/PET"
+    "/share/data/DAO/input/Forcing_micromet_corrected/ET_HS"
 )
 
 # Output root folder. The script creates P and PET subfolders automatically.
 OUTPUT_ROOT = Path(
-    "/share/data/DAO/input/output_geotiffs"
+    "/share/data/DAO/input/output_geotiffs_micromet"
+)
+
+# Reference grid used for all GeoTIFF outputs.
+WORKING_GRID_PATH = Path(
+    "/share/data/DAO/static/processed/working_grid_3035_1km_precip_valid.tif"
 )
 
 # Variable names inside the NetCDF files.
@@ -50,8 +56,8 @@ START_DATE = None
 END_DATE = None
 
 # Examples:
-# START_DATE = "2025-01-01"
-# END_DATE = "2025-12-31"
+START_DATE = "2021-01-01"
+END_DATE = "2024-12-31"
 
 # Existing-file behaviour.
 OVERWRITE_EXISTING = False
@@ -68,6 +74,9 @@ FALLBACK_CRS = "EPSG:3035"
 
 # Output compression.
 GEOTIFF_COMPRESSION = "lzw"
+
+# Resampling used when source and target grids differ.
+REPROJECT_RESAMPLING = "bilinear"
 
 # =============================================================================
 # END USER SETTINGS
@@ -385,6 +394,76 @@ def build_grid_definition(
         transform=transform,
         crs=read_crs(dataset, variable),
     )
+
+
+def load_grid_from_geotiff(path: Path) -> GridDefinition:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Working grid file does not exist: {path}"
+        )
+
+    with rasterio.open(path) as source:
+        if source.crs is None:
+            raise ValueError(
+                f"Working grid has no CRS: {path}"
+            )
+
+        return GridDefinition(
+            width=int(source.width),
+            height=int(source.height),
+            transform=source.transform,
+            crs=source.crs,
+        )
+
+
+def parse_resampling(name: str) -> Resampling:
+    normalized = name.strip().lower()
+
+    mapping = {
+        "nearest": Resampling.nearest,
+        "bilinear": Resampling.bilinear,
+        "cubic": Resampling.cubic,
+        "average": Resampling.average,
+    }
+
+    if normalized not in mapping:
+        raise ValueError(
+            "REPROJECT_RESAMPLING must be one of: "
+            f"{', '.join(mapping.keys())}. Got '{name}'."
+        )
+
+    return mapping[normalized]
+
+
+def align_to_target_grid(
+    data: np.ndarray,
+    source_grid: GridDefinition,
+    target_grid: GridDefinition,
+    nodata: float,
+    resampling: Resampling,
+) -> np.ndarray:
+    if grid_is_equivalent(source_grid, target_grid):
+        return data
+
+    destination = np.full(
+        (target_grid.height, target_grid.width),
+        np.float32(nodata),
+        dtype=np.float32,
+    )
+
+    reproject(
+        source=data,
+        destination=destination,
+        src_transform=source_grid.transform,
+        src_crs=source_grid.crs,
+        src_nodata=np.float32(nodata),
+        dst_transform=target_grid.transform,
+        dst_crs=target_grid.crs,
+        dst_nodata=np.float32(nodata),
+        resampling=resampling,
+    )
+
+    return destination
 
 
 def grid_is_equivalent(
@@ -730,6 +809,15 @@ def convert_product(
 
     processed_dates: set[pd.Timestamp] = set()
     current_reference_grid = reference_grid
+    source_reference_grid: GridDefinition | None = None
+    reproject_resampling = parse_resampling(
+        REPROJECT_RESAMPLING
+    )
+
+    if current_reference_grid is None:
+        raise ValueError(
+            "A reference working grid must be provided."
+        )
 
     print()
     print("=" * 78)
@@ -777,24 +865,30 @@ def convert_product(
                 y_name=y_name,
             )
 
-            if current_reference_grid is None:
-                current_reference_grid = grid
+            if source_reference_grid is None:
+                source_reference_grid = grid
 
                 print(
-                    "  Reference grid: "
+                    "  Source grid: "
                     f"{grid.width} x {grid.height}, "
                     f"{grid.transform.a:g} m, "
                     f"{grid.crs}"
                 )
-
+                print(
+                    "  Target grid: "
+                    f"{current_reference_grid.width} x "
+                    f"{current_reference_grid.height}, "
+                    f"{current_reference_grid.transform.a:g} m, "
+                    f"{current_reference_grid.crs}"
+                )
             elif not grid_is_equivalent(
-                current_reference_grid,
+                source_reference_grid,
                 grid,
             ):
-                raise ValueError(
-                    f"Grid mismatch in {source_path}\n"
-                    f"Reference grid: {current_reference_grid}\n"
-                    f"Current grid:   {grid}"
+                print(
+                    "  Warning: source grid differs from the first "
+                    "source file; this file will be reprojected "
+                    "to the target working grid."
                 )
 
             number_of_steps = int(
@@ -880,10 +974,18 @@ def convert_product(
                     nodata=nodata,
                 )
 
+                data = align_to_target_grid(
+                    data=data,
+                    source_grid=grid,
+                    target_grid=current_reference_grid,
+                    nodata=nodata,
+                    resampling=reproject_resampling,
+                )
+
                 write_daily_geotiff(
                     output_path=output_path,
                     data=data,
-                    grid=grid,
+                    grid=current_reference_grid,
                     nodata=nodata,
                     variable_name=variable_name,
                     date=date,
@@ -972,6 +1074,9 @@ def report_date_consistency(
 
 def main() -> int:
     start_date, end_date = validate_settings()
+    working_grid = load_grid_from_geotiff(
+        WORKING_GRID_PATH
+    )
 
     OUTPUT_ROOT.mkdir(
         parents=True,
@@ -985,10 +1090,12 @@ def main() -> int:
     print(f"Output root:    {OUTPUT_ROOT}")
     print(f"P variable:     {P_VARIABLE_NAME}")
     print(f"PET variable:   {PET_VARIABLE_NAME}")
+    print(f"Working grid:   {WORKING_GRID_PATH}")
     print(f"Start date:     {start_date}")
     print(f"End date:       {end_date}")
     print(f"Overwrite:      {OVERWRITE_EXISTING}")
     print(f"Output nodata:  {OUTPUT_NODATA}")
+    print(f"Resampling:     {REPROJECT_RESAMPLING}")
 
     precipitation_dates, reference_grid = convert_product(
         input_folder=P_NETCDF_FOLDER,
@@ -1000,7 +1107,7 @@ def main() -> int:
         end_date=end_date,
         overwrite=OVERWRITE_EXISTING,
         strict_date_check=STRICT_DATE_CHECK,
-        reference_grid=None,
+        reference_grid=working_grid,
     )
 
     pet_dates, _ = convert_product(

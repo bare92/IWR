@@ -33,7 +33,7 @@ def read_raster(raster_path):
 
 
 def main():
-    config_path = Path(__file__).resolve().parent / "config" / "config.json"
+    config_path = Path(__file__).resolve().parent / "config" / "config_eraL.json"
     config = read_config(config_path)
 
     start_date = datetime.strptime(config["start_date"], "%Y-%m-%d")

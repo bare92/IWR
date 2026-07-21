@@ -31,8 +31,8 @@ import matplotlib.pyplot as plt
 # USER SETTINGS
 # =========================
 
-INPUT_DIR = Path("/share/data/DAO/output_aida_dynamic_Kc_less_draining/IWR")
-OUTPUT_DIR = Path("/share/data/DAO/output_aida_dynamic_Kc_less_draining/IWR_plots")
+INPUT_DIR = Path("/share/data/DAO/output_eraLand/IWR")
+OUTPUT_DIR = Path("/share/data/DAO/output_eraLand/IWR_plots")
 
 # Choose what to plot for annual totals:
 #   "volume_m3" = total water volume over the model domain

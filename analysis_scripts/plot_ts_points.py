@@ -26,62 +26,83 @@ import matplotlib.pyplot as plt
 
 
 # ==========================================================
+# BASE PATHS (single point of change)
+# Change folder names here only.
+# ==========================================================
+
+DAO_ROOT = Path("/share/data/DAO")
+
+# Examples: "output_eraLand", "output_eraLand_dynamic_Kc"
+MODEL_OUTPUT_FOLDER_NAME = "output_eraLand"
+
+# Example: "output_geotiffs_micromet"
+FORCING_INPUT_FOLDER_NAME = "output_geotiffs_micromet"
+
+MODEL_OUTPUT_ROOT = DAO_ROOT / MODEL_OUTPUT_FOLDER_NAME
+FORCING_INPUT_ROOT = DAO_ROOT / "input" / FORCING_INPUT_FOLDER_NAME
+
+
+# ==========================================================
 # DEFAULT VARIABLE CONFIGURATION
 # Modify these paths or pass them from command line if needed.
 # ==========================================================
 
 DEFAULT_VARIABLES = {
     "iwr": {
-        "folder": "/share/data/DAO/output_aida/IWR",
+        "folder": str(MODEL_OUTPUT_ROOT / "IWR"),
         "pattern": "iwr_*.tif",
         "label": "IWR",
         "units": "mm/day",
         "group": "model",
     },
     "actual_evapotranspiration": {
-        "folder": "/share/data/DAO/output_aida/IWR_debug/actual_evapotranspiration_for_balance",
+        "folder": str(
+            MODEL_OUTPUT_ROOT
+            / "IWR_debug"
+            / "actual_evapotranspiration_for_balance"
+        ),
         "pattern": "actual_evapotranspiration_for_balance_*.tif",
         "label": "Actual evapotranspiration for balance",
         "units": "mm/day",
         "group": "model",
     },
     "kc_pixel": {
-        "folder": "/share/data/DAO/output_aida_dynamic_Kc/IWR_debug/kc_pixel",
+        "folder": str(MODEL_OUTPUT_ROOT / "IWR_debug" / "kc_pixel"),
         "pattern": "kc_pixel_*.tif",
         "label": "Crop coefficient",
         "units": "-",
         "group": "overlay",
     },
     "deep_percolation": {
-        "folder": "/share/data/DAO/output_aida/IWR_debug/deep_percolation",
+        "folder": str(MODEL_OUTPUT_ROOT / "IWR_debug" / "deep_percolation"),
         "pattern": "deep_percolation_*.tif",
         "label": "Deep percolation",
         "units": "mm/day",
         "group": "model",
     },
     "runoff": {
-        "folder": "/share/data/DAO/output_aida/IWR_debug/runoff",
+        "folder": str(MODEL_OUTPUT_ROOT / "IWR_debug" / "runoff"),
         "pattern": "runoff_*.tif",
         "label": "Runoff",
         "units": "mm/day",
         "group": "model",
     },
     "soil_saturation": {
-        "folder": "/share/data/DAO/output_aida/IWR_debug/soil_saturation",
+        "folder": str(MODEL_OUTPUT_ROOT / "IWR_debug" / "soil_saturation"),
         "pattern": "soil_saturation_*.tif",
         "label": "Soil saturation",
         "units": "fraction",
         "group": "model",
     },
     "precipitation": {
-        "folder": "/share/data/DAO/input/output_geotiffs/P",
+        "folder": str(FORCING_INPUT_ROOT / "P"),
         "pattern": "*.tif",
         "label": "Precipitation",
         "units": "mm/day",
         "group": "forcing",
     },
     "et0": {
-        "folder": "/share/data/DAO/input/output_geotiffs/PET",
+        "folder": str(FORCING_INPUT_ROOT / "PET"),
         "pattern": "*.tif",
         "label": "ET0",
         "units": "mm/day",
@@ -99,7 +120,7 @@ DEFAULT_VARIABLES = {
 RUN_CONFIG = {
     # Required inputs
     "points": "/share/data/DAO/auxiliary/shapefile_checks/point_check_crops.shp",  # e.g. "/path/to/points.shp"
-    "out_dir": "/share/data/DAO/output_aida_dynamic_Kc/IWR_plot_point_ts",
+    "out_dir": str(MODEL_OUTPUT_ROOT / "IWR_plot_point_ts"),
 
     # Optional runtime controls
     "variables": [
@@ -116,7 +137,7 @@ RUN_CONFIG = {
 
     # Data folders
     "iwr_folder": DEFAULT_VARIABLES["iwr"]["folder"],
-    "debug_folder": "/share/data/DAO/output_aida_dynamic_Kc/IWR_debug",
+    "debug_folder": str(MODEL_OUTPUT_ROOT / "IWR_debug"),
     "precipitation_folder": DEFAULT_VARIABLES["precipitation"]["folder"],
     "et0_folder": DEFAULT_VARIABLES["et0"]["folder"],
 }
