@@ -1,0 +1,46 @@
+{
+  "input": {
+    "directory": "/share/data/DAO/output_eraLand/IWR",
+    "glob": "iwr_*.tif",
+    "date_regex": "iwr_(?P<date>\\d{8})\\.tif$",
+    "date_format": "%Y%m%d"
+  },
+  "aggregation": {
+    "window": "monthly",
+    "release_step": "dekad",
+    "window_days": 30,
+    "operation": "sum",
+    "require_complete_period": false,
+    "incomplete_period_policy": "skip",
+    "minimum_valid_fraction": 0.01
+  },
+  "climatology": {
+    "directory": "/share/archive/DAO/IWRanomaly/climatology/dekads_gamma",
+    "compute_climatology": true,
+    "start_year": 1991,
+    "end_year": 2020,
+    "minimum_years": 3,
+    "minimum_positive_years": 3,
+    "gamma_epsilon": 1e-12,
+    "cdf_clip": 1e-08,
+    "overwrite": false
+  },
+  "output": {
+    "directory": "/share/archive/DAO/IWRanomaly/dekads/maps_gamma",
+    "filename_template": "iwr_spi_{year}{month:02d}_d{dekad}_gamma.tif",
+    "nodata": -9999.0,
+    "dtype": "float32",
+    "compress": "LZW",
+    "tiled": true,
+    "bigtiff": "IF_SAFER",
+    "overwrite": false,
+    "save_aggregated_iwr": true,
+    "aggregated_directory": "/share/data/DAO/output_eraLand/IWR_aggregated/dekad_gamma",
+    "aggregated_filename_template": "iwr_sum_{year}{month:02d}_d{dekad}_gamma.tif"
+  },
+  "processing": {
+    "start_date": null,
+    "end_date": null,
+    "log_level": "INFO"
+  }
+}

@@ -1,17 +1,85 @@
 {
     "WORKFLOW": {
         "MODEL": {
-            "name": "IWR_static_debug",
+            "name": "IWR_monthly_runner",
+            "description": "WATNEEDS daily water balance driven by monthly NetCDF forcing, with month-by-month streaming.",
             "time_range": {
                 "start": "{START_DATE}",
                 "end": "{END_DATE}"
             },
-            "inputs": {
+            "static_inputs": {
                 "land_cover_fractional": "{DATASETS.land_cover_aligned}",
-                "soil_type": "{DATASETS.soil_aligned}"
+                "soil_type": "{DATASETS.soil_aligned}",
+                "irrigated_mask": "{DATASETS.irrigated_areas_mask_aligned}",
+                "phenoe1": "{DATASETS.phenoe1_aligned}",
+                "phenoe2": "{DATASETS.phenoe2_aligned}",
+                "phenom1": "{DATASETS.phenom1_aligned}",
+                "phenom2": "{DATASETS.phenom2_aligned}",
+                "phenos1": "{DATASETS.phenos1_aligned}",
+                "phenos2": "{DATASETS.phenos2_aligned}",
+                "phenosen1": "{DATASETS.phenosen1_aligned}",
+                "phenosen2": "{DATASETS.phenosen2_aligned}",
+                "initial_condition": "watneeds_half_taw"
+            },
+            "soil_parameters": {
+                "taw_layer": null,
+                "smax_layer": null,
+                "fmax_layer": null,
+                "description": "Optional: external soil water and percolation rasters. If null, derived from soil texture."
+            },
+            "forcing": {
+                "source": "netcdf",
+                "frequency": "monthly",
+                "time_step": "daily",
+                "root_dir": "{DATASETS.forcing.path}",
+                "variables": {
+                    "et0": {
+                        "folder": "ET_HS",
+                        "file_pattern": "potential_evapotranspiration_{year}_{month:02d}.nc",
+                        "variable_name": "PET"
+                    },
+                    "precipitation": {
+                        "folder": "P",
+                        "file_pattern": "precipitation_{year}_{month:02d}.nc",
+                        "variable_name": null
+                    },
+                    "temperature": {
+                        "folder": "Temperature",
+                        "file_pattern": "temperature_{year}_{month:02d}.nc",
+                        "variable_name": null
+                    },
+                    "temperature_min": {
+                        "folder": "Temperature_min",
+                        "file_pattern": "temperature_min_{year}_{month:02d}.nc",
+                        "variable_name": null
+                    },
+                    "temperature_max": {
+                        "folder": "Temperature_max",
+                        "file_pattern": "temperature_max_{year}_{month:02d}.nc",
+                        "variable_name": null
+                    }
+                }
+            },
+            "runner": {
+                "type": "monthly_iwr_runner",
+                "crop_name": "wheat",
+                "use_direct_etc": false,
+                "use_phenology_kc": true,
+                "skip_iwr_when_inactive": true,
+                "phenology_nodata_value": null,
+                "write_monthly_outputs": true,
+                "output_dir": "{PROCESSED_DIR}/iwr_daily_outputs",
+                "description": "Monthly runner processes forcing chunks, carries soil storage across months, writes daily NetCDF per month."
+            },
+            "processing": {
+                "peff_reduction_pct": 5.0,
+                "weight_by_crop_fraction": true,
+                "spinup_years": 0,
+                "irrigated_simulation": false
             },
             "debug": {
-                "print_summary": true
+                "print_summary": true,
+                "print_months": true
             }
         }
     }
