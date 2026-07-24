@@ -1,6 +1,6 @@
 {
-  "start_date": "2021-01-01",
-  "end_date": "2024-12-31",
+  "start_date": "1991-01-01",
+  "end_date": "2026-04-30",
 
   "irrigated_areas_path": "/share/data/DAO/static/processed/distretti_irrigui_SIGRIAN_3035_1km_mask_aligned.tif",
   "valid_mask_path": "/share/data/DAO/static/processed/working_grid_3035_1km_precip_valid.tif",
@@ -29,10 +29,10 @@
   "crop_fraction_path": "/share/data/DAO/AIDA/italy_areas_irrigated_DAO_1km_clipped.tif",
   "crop_parameters_csv": "/share/data/DAO/static/processed/crop_parameters_aida_irrigated.csv",
 
-  "strict_checks": true,
-  "write_debug_csv": true,
+  "strict_checks": false,
+  "write_debug_csv": false,
   "write_cumulative_iwr": true,
-  "debug_mode": true,
+  "debug_mode": false,
   "max_precipitation_mm_day": 350,
   "max_et0_mm_day": 20,
   "max_iwr_mm_day": 100,

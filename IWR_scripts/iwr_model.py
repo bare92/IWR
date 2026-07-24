@@ -7,6 +7,7 @@ import numpy as np
 import rasterio
 
 from utilities import array_stats, assert_reasonable_range, read_forcing_geotiff_day, debug_imshow
+from utilities import build_forcing_file_index
 from phenology_functions import (
     create_phenology_status_mask_from_date,
     create_dynamic_kc_curve_from_date,
@@ -647,6 +648,49 @@ def water_balance_step(
     return soil_moisture.astype(np.float32)
 
 
+def write_active_pixel_mask_geotiff(
+    output_path,
+    data,
+    profile,
+    date=None,
+):
+    """
+    Write one daily active-pixel mask as uint8 GeoTIFF.
+
+    Pixel values:
+        1 — phenology active AND crop fraction > 0 AND irrigation mask == 1 AND valid area
+        0 — any condition above is not met, or nodata
+    """
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    mask_profile = profile.copy()
+    mask_profile.update(
+        driver="GTiff",
+        dtype="uint8",
+        count=1,
+        nodata=None,
+        compress="lzw",
+    )
+
+    if profile.get("crs") is not None:
+        mask_profile["crs"] = profile["crs"]
+    if profile.get("transform") is not None:
+        mask_profile["transform"] = profile["transform"]
+
+    tags = {
+        "variable": "active_pixel_mask",
+        "description": "1=phenology_active+crop_fraction>0+irrigation_mask=1+valid_area, 0=inactive/nodata",
+    }
+    if date is not None:
+        tags["date"] = date.strftime("%Y-%m-%d")
+
+    with rasterio.open(output_path, "w", **mask_profile) as dst:
+        dst.write(data.astype(np.uint8), 1)
+        dst.update_tags(**tags)
+
+
 def write_daily_geotiff(
     output_path,
     data,
@@ -921,12 +965,14 @@ def run_iwr_model(
     write_cumulative_iwr=True,
     write_green_blue_outputs=False,
     write_daily_green_blue_outputs=False,
+    write_active_pixel_masks=False,
     debug_mode=False,
     debug_output_folder=None,
     max_precipitation_mm_day=300,
     max_et0_mm_day=20,
     max_iwr_mm_day=100,
     min_valid_forcing_fraction=0.01,
+    debug_csv_frequency_days=1,
 ):
     """
     Run daily IWR water balance using the cropped-area-depth convention.
@@ -948,6 +994,11 @@ def run_iwr_model(
     - nodata is propagated safely; no arithmetic on -9999 values.
     - Daily irrigation maps are written as GeoTIFFs if output_folder is provided.
     - Computation is restricted to valid_area_mask == 1.
+        - Before writing daily IWR, pixels that are not active are set to nodata.
+            Active means: phenology active AND crop fraction > 0 AND irrigation_mask == 1
+            AND valid area.
+        - Optional uint8 active-pixel mask files can still be written with
+            write_active_pixel_masks=True.
     """
 
     crop_fraction_data, crop_fraction_sum = prepare_crop_fractions(
@@ -1018,11 +1069,39 @@ def run_iwr_model(
     static_valid_mask = (soil_moisture != nodata) & valid_area_pixels
     daily_stats_rows = []
 
+    # Prepare active-pixel-mask output folder at the same level as output_folder.
+    active_pixel_masks_folder = None
+    if write_active_pixel_masks and output_folder is not None:
+        active_pixel_masks_folder = Path(output_folder).parent / "IWR active pixel masks"
+        active_pixel_masks_folder.mkdir(parents=True, exist_ok=True)
+
+    if debug_csv_frequency_days < 1:
+        raise ValueError("debug_csv_frequency_days must be >= 1")
+
+    print(f"Building precipitation file index from: {precipitation_geotiff_folder}")
+    precipitation_file_index = build_forcing_file_index(
+        precipitation_geotiff_folder
+    )
+    print(f"Indexed precipitation files: {len(precipitation_file_index)}")
+
+    print(f"Building ET0 file index from: {et0_geotiff_folder}")
+    et0_file_index = build_forcing_file_index(
+        et0_geotiff_folder
+    )
+    print(f"Indexed ET0 files: {len(et0_file_index)}")
+
     # Pre-compute TAW max for soil_moisture sanity check.
     taw_valid = total_available_water_pixel[total_available_water_pixel != nodata]
     taw_max = float(np.max(taw_valid)) * 1.05 if taw_valid.size > 0 else 10000.0
 
     current_date = start_date
+    day_index = 0
+
+    total_days = (end_date - start_date).days + 1
+    print(
+        f"Starting daily processing from {start_date.strftime('%Y-%m-%d')} "
+        f"to {end_date.strftime('%Y-%m-%d')} ({total_days} days)"
+    )
 
     while current_date <= end_date:
 
@@ -1040,6 +1119,7 @@ def run_iwr_model(
             nodata=nodata,
             min_valid_fraction=min_valid_forcing_fraction,
             variable_name="precipitation",
+            file_index=precipitation_file_index,
         )
 
         et0 = read_forcing_geotiff_day(
@@ -1051,6 +1131,7 @@ def run_iwr_model(
             nodata=nodata,
             min_valid_fraction=min_valid_forcing_fraction,
             variable_name="et0",
+            file_index=et0_file_index,
         )
 
         # ------------------------------------------------------------------ #
@@ -1082,12 +1163,6 @@ def run_iwr_model(
         # ------------------------------------------------------------------ #
         # 3. Phenology and Kc                                                  #
         # ------------------------------------------------------------------ #
-        phenology_status = create_phenology_status_mask_from_date(
-            current_date=current_date,
-            phenology=phenology,
-            nodata=nodata,
-        )
-
         kc_pixel = create_kc_pixel(
             current_date=current_date,
             phenology=phenology,
@@ -1246,6 +1321,12 @@ def run_iwr_model(
         valid_irrigated_mask = model_valid_mask & irrigated_pixels
         valid_irrigation_vals = irrigation[valid_irrigated_mask]
         if valid_irrigation_vals.size > 0 and float(np.max(valid_irrigation_vals)) > max_iwr_mm_day:
+            phenology_status = create_phenology_status_mask_from_date(
+                current_date=current_date,
+                phenology=phenology,
+                nodata=nodata,
+            )
+
             irr_display = np.where(valid_irrigated_mask, irrigation, 0.0)
             r, c = np.unravel_index(np.argmax(irr_display), irr_display.shape)
             print(
@@ -1283,34 +1364,46 @@ def run_iwr_model(
         # ------------------------------------------------------------------ #
         # 11. Runoff and soil moisture update                                  #
         # ------------------------------------------------------------------ #
-        runoff_balance_before_threshold = np.full_like(soil_moisture, nodata, dtype=np.float32)
-        runoff_excess_before_threshold = np.full_like(soil_moisture, nodata, dtype=np.float32)
+        runoff_balance_before_threshold = None
+        runoff_excess_before_threshold = None
 
-        runoff_balance_mask = (
-            model_valid_mask
-            & np.isfinite(soil_moisture)
-            & np.isfinite(precipitation_effective)
-            & np.isfinite(actual_evapotranspiration_for_balance)
-            & np.isfinite(deep_percolation)
-            & np.isfinite(total_available_water_pixel)
-            & (soil_moisture != nodata)
-            & (precipitation_effective != nodata)
-            & (actual_evapotranspiration_for_balance != nodata)
-            & (deep_percolation != nodata)
-            & (total_available_water_pixel != nodata)
-        )
+        if debug_mode:
+            runoff_balance_before_threshold = np.full_like(
+                soil_moisture,
+                nodata,
+                dtype=np.float32,
+            )
+            runoff_excess_before_threshold = np.full_like(
+                soil_moisture,
+                nodata,
+                dtype=np.float32,
+            )
 
-        runoff_balance_before_threshold[runoff_balance_mask] = (
-            soil_moisture[runoff_balance_mask]
-            + precipitation_effective[runoff_balance_mask]
-            - actual_evapotranspiration_for_balance[runoff_balance_mask]
-            - deep_percolation[runoff_balance_mask]
-        ).astype(np.float32)
+            runoff_balance_mask = (
+                model_valid_mask
+                & np.isfinite(soil_moisture)
+                & np.isfinite(precipitation_effective)
+                & np.isfinite(actual_evapotranspiration_for_balance)
+                & np.isfinite(deep_percolation)
+                & np.isfinite(total_available_water_pixel)
+                & (soil_moisture != nodata)
+                & (precipitation_effective != nodata)
+                & (actual_evapotranspiration_for_balance != nodata)
+                & (deep_percolation != nodata)
+                & (total_available_water_pixel != nodata)
+            )
 
-        runoff_excess_before_threshold[runoff_balance_mask] = (
-            runoff_balance_before_threshold[runoff_balance_mask]
-            - total_available_water_pixel[runoff_balance_mask]
-        ).astype(np.float32)
+            runoff_balance_before_threshold[runoff_balance_mask] = (
+                soil_moisture[runoff_balance_mask]
+                + precipitation_effective[runoff_balance_mask]
+                - actual_evapotranspiration_for_balance[runoff_balance_mask]
+                - deep_percolation[runoff_balance_mask]
+            ).astype(np.float32)
+
+            runoff_excess_before_threshold[runoff_balance_mask] = (
+                runoff_balance_before_threshold[runoff_balance_mask]
+                - total_available_water_pixel[runoff_balance_mask]
+            ).astype(np.float32)
 
         runoff = compute_subsurface_runoff(
             soil_moisture_previous=soil_moisture,
@@ -1381,11 +1474,22 @@ def run_iwr_model(
         # ------------------------------------------------------------------ #
         # 12. Write daily outputs                                              #
         # ------------------------------------------------------------------ #
+        active_pixel_mask = (
+            (kc_pixel > 0)
+            & (crop_fraction_sum > 0)
+            & (irrigation_mask == 1)
+            & valid_area_pixels
+            & (total_available_water_pixel != nodata)
+        )
+
+        irrigation_to_write = np.full_like(irrigation, nodata, dtype=np.float32)
+        irrigation_to_write[active_pixel_mask] = irrigation[active_pixel_mask]
+
         if output_folder is not None and output_profile is not None:
             output_file = Path(output_folder) / f"iwr_{current_date.strftime('%Y%m%d')}.tif"
             write_daily_geotiff(
                 output_path=output_file,
-                data=irrigation,
+                data=irrigation_to_write,
                 profile=output_profile,
                 nodata=nodata,
                 date=current_date,
@@ -1393,6 +1497,19 @@ def run_iwr_model(
                     "variable": "daily_blue_water_requirement",
                     "units": "mm/day over cropped/irrigated crop area",
                 },
+            )
+
+        if active_pixel_masks_folder is not None and output_profile is not None:
+            active_pixel_data = active_pixel_mask.astype(np.uint8)
+            mask_file = (
+                active_pixel_masks_folder
+                / f"active_pixels_{current_date.strftime('%Y%m%d')}.tif"
+            )
+            write_active_pixel_mask_geotiff(
+                output_path=mask_file,
+                data=active_pixel_data,
+                profile=output_profile,
+                date=current_date,
             )
 
         if debug_mode and output_profile is not None:
@@ -1552,40 +1669,42 @@ def run_iwr_model(
         # 13. Collect daily diagnostics                                        #
         # ------------------------------------------------------------------ #
         if write_debug_csv:
-            forcing_valid_pct = 100.0 * float(np.sum(forcing_valid_mask)) / forcing_valid_mask.size
-            model_valid_pct   = 100.0 * float(np.sum(model_valid_mask))   / model_valid_mask.size
-            row = {
-                "date":               date_str,
-                "forcing_valid_pct":  round(forcing_valid_pct, 2),
-                "model_valid_pct":    round(model_valid_pct, 2),
-            }
-            for var_name, var_arr in [
-                ("precipitation",                         precipitation),
-                ("et0",                                   et0),
-                ("crop_fraction_sum",                     crop_fraction_sum),
-                ("kc_pixel",                              kc_pixel),
-                ("precipitation_effective",               precipitation_effective),
-                ("potential_evapotranspiration",          potential_evapotranspiration),
-                ("green_water_stress_coefficient",        green_water_stress_coefficient),
-                ("green_evapotranspiration_watneeds",     green_evapotranspiration_watneeds),
-                ("blue_iwr_watneeds",                     blue_iwr_watneeds),
-                ("actual_evapotranspiration_for_balance", actual_evapotranspiration_for_balance),
-                ("green_et",                              green_et),
-                ("blue_et",                               blue_et),
-                ("deep_percolation",                      deep_percolation),
-                ("irrigation",                            irrigation),
-                ("soil_moisture",                         soil_moisture),
-                ("runoff",                                runoff),
-                ("cumulative_irrigation",                 cumulative_irrigation),
-            ]:
-                stats = array_stats(var_arr, nodata=nodata)
-                for stat_key in ("min", "p50", "p95", "p99", "max"):
-                    v = stats[stat_key]
-                    row[f"{var_name}_{stat_key}"] = round(v, 4) if v == v else "nan"
-            daily_stats_rows.append(row)
+            if day_index % debug_csv_frequency_days == 0:
+                forcing_valid_pct = 100.0 * float(np.sum(forcing_valid_mask)) / forcing_valid_mask.size
+                model_valid_pct   = 100.0 * float(np.sum(model_valid_mask))   / model_valid_mask.size
+                row = {
+                    "date":               date_str,
+                    "forcing_valid_pct":  round(forcing_valid_pct, 2),
+                    "model_valid_pct":    round(model_valid_pct, 2),
+                }
+                for var_name, var_arr in [
+                    ("precipitation",                         precipitation),
+                    ("et0",                                   et0),
+                    ("crop_fraction_sum",                     crop_fraction_sum),
+                    ("kc_pixel",                              kc_pixel),
+                    ("precipitation_effective",               precipitation_effective),
+                    ("potential_evapotranspiration",          potential_evapotranspiration),
+                    ("green_water_stress_coefficient",        green_water_stress_coefficient),
+                    ("green_evapotranspiration_watneeds",     green_evapotranspiration_watneeds),
+                    ("blue_iwr_watneeds",                     blue_iwr_watneeds),
+                    ("actual_evapotranspiration_for_balance", actual_evapotranspiration_for_balance),
+                    ("green_et",                              green_et),
+                    ("blue_et",                               blue_et),
+                    ("deep_percolation",                      deep_percolation),
+                    ("irrigation",                            irrigation),
+                    ("soil_moisture",                         soil_moisture),
+                    ("runoff",                                runoff),
+                    ("cumulative_irrigation",                 cumulative_irrigation),
+                ]:
+                    stats = array_stats(var_arr, nodata=nodata)
+                    for stat_key in ("min", "p50", "p95", "p99", "max"):
+                        v = stats[stat_key]
+                        row[f"{var_name}_{stat_key}"] = round(v, 4) if v == v else "nan"
+                daily_stats_rows.append(row)
 
         print(f"Processed: {date_str}")
 
+        day_index += 1
         current_date = current_date + timedelta(days=1)
 
     # ---------------------------------------------------------------------- #

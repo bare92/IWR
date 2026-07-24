@@ -72,6 +72,14 @@ IGNORE_NEGATIVE_VALUES = True
 DATE_START = None   # example: "2021-01-01"
 DATE_END = None     # example: "2024-12-31"
 
+# Annual plot readability.
+ANNUAL_MAX_X_LABELS = 12
+ANNUAL_MIN_FIGURE_WIDTH = 14.0
+ANNUAL_MAX_FIGURE_WIDTH = 20.0
+ANNUAL_INCHES_PER_YEAR = 0.42
+ANNUAL_FIGURE_HEIGHT = 6.0
+ANNUAL_LABEL_ROTATION = 45
+
 
 # =========================
 # FUNCTIONS
@@ -366,6 +374,54 @@ def save_daily_iwr_plot(df: pd.DataFrame):
     print(f"Saved: {out}")
 
 
+
+
+def prepare_annual_x_axis(ax, year_values):
+    """
+    Plot all annual bars but label only a limited number of years.
+
+    For a long series such as 1991-2026, this normally labels every
+    third year. The first and last years are always shown.
+    """
+    years = np.asarray(year_values, dtype=int)
+    positions = np.arange(len(years), dtype=float)
+
+    if len(years) == 0:
+        return positions
+
+    label_step = max(
+        1,
+        int(np.ceil((len(years) - 1) / max(1, ANNUAL_MAX_X_LABELS - 1))),
+    )
+
+    tick_indices = np.arange(0, len(years), label_step, dtype=int)
+
+    if tick_indices[-1] != len(years) - 1:
+        tick_indices = np.append(tick_indices, len(years) - 1)
+
+    ax.set_xticks(positions[tick_indices])
+    ax.set_xticklabels(
+        years[tick_indices].astype(str),
+        rotation=ANNUAL_LABEL_ROTATION,
+        ha="right",
+        rotation_mode="anchor",
+    )
+
+    ax.tick_params(axis="x", labelsize=10, pad=4)
+    ax.margins(x=0.01)
+
+    return positions
+
+
+def annual_figure_size(number_of_years):
+    width = number_of_years * ANNUAL_INCHES_PER_YEAR
+    width = min(
+        ANNUAL_MAX_FIGURE_WIDTH,
+        max(ANNUAL_MIN_FIGURE_WIDTH, width),
+    )
+    return width, ANNUAL_FIGURE_HEIGHT
+
+
 def save_yearly_iwr_plot(df: pd.DataFrame):
     """
     Annual model IWR bar plot with AIDA reference line.
@@ -379,7 +435,6 @@ def save_yearly_iwr_plot(df: pd.DataFrame):
         ylabel = "Annual IWR [million m3/year]"
         title = "Annual irrigation water requirement"
         aida_label = "AIDA blue-water IWR"
-
     else:
         annual = df.groupby("year", as_index=False)["iwr_mean_mm"].sum()
         y = annual["iwr_mean_mm"]
@@ -387,11 +442,13 @@ def save_yearly_iwr_plot(df: pd.DataFrame):
         title = "Annual irrigation water requirement"
         aida_label = "AIDA blue-water IWR"
 
-    years = annual["year"].astype(str)
+    years = annual["year"].to_numpy(dtype=int)
+    values = y.to_numpy(dtype=float)
 
-    fig, ax = plt.subplots(figsize=(9, 5))
+    fig, ax = plt.subplots(figsize=annual_figure_size(len(years)))
+    x = prepare_annual_x_axis(ax, years)
 
-    ax.bar(years, y, label="Model IWR")
+    ax.bar(x, values, width=0.78, label="Model IWR")
 
     if aida_value is not None:
         ax.axhline(
@@ -401,25 +458,28 @@ def save_yearly_iwr_plot(df: pd.DataFrame):
             label=f"{aida_label}: {aida_value:.1f}",
         )
 
-        ax.text(
-            x=len(years) - 0.5,
-            y=aida_value,
-            s=f"AIDA = {aida_value:.1f}",
-            va="bottom",
+        ax.annotate(
+            f"AIDA = {aida_value:.1f}",
+            xy=(x[-1], aida_value),
+            xytext=(-10, 4),
+            textcoords="offset points",
             ha="right",
-            fontsize=9,
+            va="bottom",
+            fontsize=10,
         )
 
     ax.set_title(title)
-    ax.set_xlabel("Year")
+    ax.set_xlabel("Year", labelpad=12)
     ax.set_ylabel(ylabel)
     ax.grid(True, axis="y", alpha=0.3)
+    ax.set_axisbelow(True)
     ax.legend()
 
+    fig.subplots_adjust(bottom=0.20)
     fig.tight_layout()
 
     out = OUTPUT_DIR / "yearly_iwr_with_aida.png"
-    fig.savefig(out, dpi=200)
+    fig.savefig(out, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved: {out}")
 
@@ -454,7 +514,6 @@ def save_yearly_blue_green_plot(df: pd.DataFrame):
         blue = annual["blue_volume_m3"] / 1e6
         iwr = annual["iwr_volume_m3"] / 1e6
         ylabel = "Annual volume [million m3/year]"
-
     else:
         annual = df.groupby("year", as_index=False)[
             ["green_mean_mm", "blue_mean_mm", "iwr_mean_mm"]
@@ -465,23 +524,33 @@ def save_yearly_blue_green_plot(df: pd.DataFrame):
         iwr = annual["iwr_mean_mm"]
         ylabel = "Annual spatial mean [mm/year]"
 
-    years = annual["year"].astype(str)
+    years = annual["year"].to_numpy(dtype=int)
 
-    fig, ax = plt.subplots(figsize=(9, 5))
+    fig, ax = plt.subplots(figsize=annual_figure_size(len(years)))
+    x = prepare_annual_x_axis(ax, years)
 
-    ax.bar(years, green, label="Green water")
-    ax.bar(years, blue, bottom=green, label="Blue water")
-    ax.plot(years, iwr, marker="o", label="IWR")
+    ax.bar(x, green.to_numpy(), width=0.78, label="Green water")
+    ax.bar(
+        x,
+        blue.to_numpy(),
+        bottom=green.to_numpy(),
+        width=0.78,
+        label="Blue water",
+    )
+    ax.plot(x, iwr.to_numpy(), marker="o", linewidth=1.5, label="IWR")
 
     ax.set_title("Annual green and blue water components")
-    ax.set_xlabel("Year")
+    ax.set_xlabel("Year", labelpad=12)
     ax.set_ylabel(ylabel)
     ax.legend()
     ax.grid(True, axis="y", alpha=0.3)
+    ax.set_axisbelow(True)
 
+    fig.subplots_adjust(bottom=0.20)
     fig.tight_layout()
+
     out = OUTPUT_DIR / "yearly_iwr_blue_green.png"
-    fig.savefig(out, dpi=200)
+    fig.savefig(out, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved: {out}")
 
@@ -521,6 +590,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 

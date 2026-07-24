@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import sys
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -56,8 +57,8 @@ START_DATE = None
 END_DATE = None
 
 # Examples:
-START_DATE = "2021-01-01"
-END_DATE = "2024-12-31"
+START_DATE = "1991-01-01"
+END_DATE = "2026-04-30"
 
 # Existing-file behaviour.
 OVERWRITE_EXISTING = False
@@ -77,6 +78,10 @@ GEOTIFF_COMPRESSION = "lzw"
 
 # Resampling used when source and target grids differ.
 REPROJECT_RESAMPLING = "bilinear"
+
+# Number of threads used by rasterio.reproject.
+# Use 0 to auto-detect (all available CPU cores).
+REPROJECT_NUM_THREADS = 0
 
 # =============================================================================
 # END USER SETTINGS
@@ -441,6 +446,7 @@ def align_to_target_grid(
     target_grid: GridDefinition,
     nodata: float,
     resampling: Resampling,
+    num_threads: int,
 ) -> np.ndarray:
     if grid_is_equivalent(source_grid, target_grid):
         return data
@@ -461,6 +467,7 @@ def align_to_target_grid(
         dst_crs=target_grid.crs,
         dst_nodata=np.float32(nodata),
         resampling=resampling,
+        num_threads=num_threads,
     )
 
     return destination
@@ -598,44 +605,13 @@ def open_dataset_with_fallback(
 
 
 def prepare_daily_array(
-    variable: xr.DataArray,
-    time_index: int,
-    x_name: str,
-    y_name: str,
-    x_values: np.ndarray,
-    y_values: np.ndarray,
+    daily_slice: xr.DataArray,
+    flip_up_down: bool,
+    flip_left_right: bool,
     nodata: float,
 ) -> np.ndarray:
-    daily = variable.isel(time=time_index)
-
-    extra_dimensions = [
-        dimension
-        for dimension in daily.dims
-        if dimension not in {x_name, y_name}
-    ]
-
-    if extra_dimensions:
-        non_singleton = [
-            dimension
-            for dimension in extra_dimensions
-            if daily.sizes[dimension] != 1
-        ]
-
-        if non_singleton:
-            raise ValueError(
-                "Unexpected non-spatial dimensions after selecting time: "
-                f"{non_singleton}"
-            )
-
-        daily = daily.squeeze(
-            extra_dimensions,
-            drop=True,
-        )
-
-    daily = daily.transpose(y_name, x_name)
-
     data = np.asarray(
-        daily.values,
+        daily_slice.values,
         dtype=np.float32,
     )
 
@@ -646,24 +622,23 @@ def prepare_daily_array(
         )
 
     # GeoTIFF rows must run north to south.
-    if y_values[0] < y_values[-1]:
+    if flip_up_down:
         data = np.flipud(data)
 
     # GeoTIFF columns must run west to east.
-    if x_values[0] > x_values[-1]:
+    if flip_left_right:
         data = np.fliplr(data)
 
-    valid = np.isfinite(data)
-
-    cleaned = np.full(
-        data.shape,
-        nodata,
-        dtype=np.float32,
+    # Replace NaN/inf in-place to avoid extra large temporary arrays.
+    np.nan_to_num(
+        data,
+        copy=False,
+        nan=np.float32(nodata),
+        posinf=np.float32(nodata),
+        neginf=np.float32(nodata),
     )
 
-    cleaned[valid] = data[valid]
-
-    return cleaned
+    return data
 
 
 def output_filename(
@@ -813,6 +788,11 @@ def convert_product(
     reproject_resampling = parse_resampling(
         REPROJECT_RESAMPLING
     )
+    reproject_threads = (
+        max(1, int(os.cpu_count() or 1))
+        if REPROJECT_NUM_THREADS <= 0
+        else int(REPROJECT_NUM_THREADS)
+    )
 
     if current_reference_grid is None:
         raise ValueError(
@@ -825,7 +805,18 @@ def convert_product(
     print(f"Input folder:  {input_folder}")
     print(f"Output folder: {output_folder}")
     print(f"NetCDF files:  {len(files)}")
+    print(f"Reproject threads: {reproject_threads}")
     print("=" * 78)
+
+    # Avoid one stat() call per day by pre-indexing existing outputs once.
+    existing_output_names: set[str] = set()
+
+    if not overwrite:
+        existing_output_names = {
+            path.name
+            for path in output_folder.glob("*.tif")
+            if path.is_file()
+        }
 
     for file_number, source_path in enumerate(
         files,
@@ -913,6 +904,36 @@ def convert_product(
                     f"{source_path.name}."
                 )
 
+            extra_dimensions = [
+                dimension
+                for dimension in variable.dims
+                if dimension not in {"time", x_name, y_name}
+            ]
+
+            if extra_dimensions:
+                non_singleton = [
+                    dimension
+                    for dimension in extra_dimensions
+                    if variable.sizes[dimension] != 1
+                ]
+
+                if non_singleton:
+                    raise ValueError(
+                        "Unexpected non-spatial dimensions in variable: "
+                        f"{non_singleton}"
+                    )
+
+                variable = variable.squeeze(
+                    extra_dimensions,
+                    drop=True,
+                )
+
+            variable = variable.transpose(
+                "time",
+                y_name,
+                x_name,
+            )
+
             x_values = np.asarray(
                 dataset[x_name].values,
                 dtype=np.float64,
@@ -921,6 +942,13 @@ def convert_product(
             y_values = np.asarray(
                 dataset[y_name].values,
                 dtype=np.float64,
+            )
+
+            flip_up_down = bool(y_values[0] < y_values[-1])
+            flip_left_right = bool(x_values[0] > x_values[-1])
+            needs_reproject = not grid_is_equivalent(
+                grid,
+                current_reference_grid,
             )
 
             units = str(
@@ -934,18 +962,24 @@ def convert_product(
             skipped_from_file = 0
             filtered_from_file = 0
 
-            for time_index, date in enumerate(dates):
-                if not date_is_selected(
+            selected_indices = [
+                (time_index, date)
+                for time_index, date in enumerate(dates)
+                if date_is_selected(
                     date,
                     start_date,
                     end_date,
-                ):
-                    filtered_from_file += 1
-                    continue
+                )
+            ]
+
+            filtered_from_file = len(dates) - len(selected_indices)
+
+            for time_index, date in selected_indices:
+                output_name = output_filename(config, date)
 
                 output_path = (
                     output_folder
-                    / output_filename(config, date)
+                    / output_name
                 )
 
                 if date in processed_dates:
@@ -957,7 +991,7 @@ def convert_product(
                     )
 
                 if (
-                    output_path.exists()
+                    output_name in existing_output_names
                     and not overwrite
                 ):
                     processed_dates.add(date)
@@ -965,22 +999,23 @@ def convert_product(
                     continue
 
                 data = prepare_daily_array(
-                    variable=variable,
-                    time_index=time_index,
-                    x_name=x_name,
-                    y_name=y_name,
-                    x_values=x_values,
-                    y_values=y_values,
+                    daily_slice=variable.isel(
+                        time=time_index
+                    ),
+                    flip_up_down=flip_up_down,
+                    flip_left_right=flip_left_right,
                     nodata=nodata,
                 )
 
-                data = align_to_target_grid(
-                    data=data,
-                    source_grid=grid,
-                    target_grid=current_reference_grid,
-                    nodata=nodata,
-                    resampling=reproject_resampling,
-                )
+                if needs_reproject:
+                    data = align_to_target_grid(
+                        data=data,
+                        source_grid=grid,
+                        target_grid=current_reference_grid,
+                        nodata=nodata,
+                        resampling=reproject_resampling,
+                        num_threads=reproject_threads,
+                    )
 
                 write_daily_geotiff(
                     output_path=output_path,
@@ -993,6 +1028,7 @@ def convert_product(
                 )
 
                 processed_dates.add(date)
+                existing_output_names.add(output_name)
                 outputs_from_file += 1
 
             print(

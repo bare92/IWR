@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 from pathlib import Path
@@ -32,8 +33,30 @@ def read_raster(raster_path):
     return data, profile
 
 
-def main():
-    config_path = Path(__file__).resolve().parent / "config" / "config_eraL.json"
+def parse_args():
+    default_config_path = Path(__file__).resolve().parent / "config" / "config_eraL.json"
+
+    parser = argparse.ArgumentParser(
+        description="Run the simple IWR workflow from a JSON configuration file."
+    )
+    parser.add_argument(
+        "config_path",
+        nargs="?",
+        default=str(default_config_path),
+        help=(
+            "Path to the JSON config file. "
+            f"Defaults to {default_config_path}"
+        ),
+    )
+    return parser.parse_args()
+
+
+def main(config_path=None):
+    if config_path is None:
+        args = parse_args()
+        config_path = args.config_path
+
+    config_path = Path(config_path).expanduser().resolve()
     config = read_config(config_path)
 
     start_date = datetime.strptime(config["start_date"], "%Y-%m-%d")
@@ -54,10 +77,18 @@ def main():
 
     soil_output_folder = Path(config["soil_output_folder"])
 
-    soil_outputs = create_soil_parameter_rasters(
-        soil_texture_path=soil_texture_path,
-        output_folder=soil_output_folder,
-    )
+    soil_outputs = {
+        "field_capacity": soil_output_folder / "field_capacity.tif",
+        "wilting_point": soil_output_folder / "wilting_point.tif",
+        "total_available_water": soil_output_folder / "total_available_water.tif",
+        "fmax": soil_output_folder / "fmax.tif",
+    }
+
+    if not all(path.exists() for path in soil_outputs.values()):
+        soil_outputs = create_soil_parameter_rasters(
+            soil_texture_path=soil_texture_path,
+            output_folder=soil_output_folder,
+        )
 
     total_available_water, output_profile = read_raster(
         soil_outputs["total_available_water"]
@@ -115,12 +146,14 @@ def main():
         write_cumulative_iwr=config.get("write_cumulative_iwr", True),
         write_green_blue_outputs=False,
         write_daily_green_blue_outputs=False,
+        write_active_pixel_masks=config.get("write_active_pixel_masks", False),
         debug_mode=config.get("debug_mode", False),
         debug_output_folder=debug_output_folder,
         max_precipitation_mm_day=config.get("max_precipitation_mm_day", 300),
         max_et0_mm_day=config.get("max_et0_mm_day", 20),
         max_iwr_mm_day=config.get("max_iwr_mm_day", 100),
         min_valid_forcing_fraction=config.get("min_valid_forcing_fraction", 0.01),
+        debug_csv_frequency_days=config.get("debug_csv_frequency_days", 1),
     )
 
     print("Configuration loaded")
@@ -139,7 +172,8 @@ def main():
         print(name, ":", path)
 
     print("Crop parameters loaded")
-    print(crop_df)
+    if config.get("print_crop_parameters", False):
+        print(crop_df)
     print("Crop fraction raster shape:", crop_fraction_data.shape)
     print("Crop raster bands:", crop_band_descriptions)
 

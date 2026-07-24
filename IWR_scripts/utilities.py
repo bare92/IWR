@@ -1,4 +1,5 @@
 import warnings
+import re
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,9 @@ _FILL_SENTINELS = [
     (-9999, 1.0),  # covers -9999, -9999.0, -9999.9
     ( 9999, 1.0),  # covers  9999,  9999.0,  9999.9
 ]
+
+_DATE_DASH_PATTERN = re.compile(r"(19|20)\d{2}-[01]\d-[0-3]\d")
+_DATE_COMPACT_PATTERN = re.compile(r"(19|20)\d{2}[01]\d[0-3]\d")
 
 
 def _crs_equivalent(crs_a, crs_b):
@@ -141,6 +145,66 @@ def clean_forcing_array(data, min_value=0.0, nodata=-9999.0):
     return data.astype(np.float32)
 
 
+def _extract_date_tokens_from_name(path: Path) -> set[str]:
+    """
+    Extract YYYY-MM-DD / YYYYMMDD tokens from a filename stem.
+    """
+
+    stem = path.stem
+    tokens: set[str] = set()
+
+    for match in _DATE_DASH_PATTERN.finditer(stem):
+        tokens.add(match.group(0))
+
+    for match in _DATE_COMPACT_PATTERN.finditer(stem):
+        tokens.add(match.group(0))
+
+    return tokens
+
+
+def build_forcing_file_index(geotiff_folder):
+    """
+    Build a date-token -> GeoTIFF path index for one forcing folder.
+
+    Keys are either YYYY-MM-DD or YYYYMMDD substrings found in filenames.
+    When multiple files match the same token, the lexicographically first path
+    is used to preserve the previous sorted-glob behavior.
+    """
+
+    geotiff_folder = Path(geotiff_folder)
+
+    if not geotiff_folder.exists() or not geotiff_folder.is_dir():
+        raise FileNotFoundError(
+            f"Forcing folder does not exist or is not a directory: {geotiff_folder}"
+        )
+
+    token_to_paths: dict[str, list[Path]] = {}
+
+    for tif_path in geotiff_folder.glob("*.tif"):
+        if not tif_path.is_file():
+            continue
+
+        tokens = _extract_date_tokens_from_name(tif_path)
+
+        for token in tokens:
+            token_to_paths.setdefault(token, []).append(tif_path)
+
+    file_index: dict[str, Path] = {}
+
+    for token, paths in token_to_paths.items():
+        sorted_paths = sorted(paths)
+
+        if len(sorted_paths) > 1:
+            print(
+                f"Warning: multiple GeoTIFFs found for token {token} in "
+                f"{geotiff_folder}. Using: {sorted_paths[0]}"
+            )
+
+        file_index[token] = sorted_paths[0]
+
+    return file_index
+
+
 def read_forcing_day(
     dataset,
     variable_name,
@@ -189,6 +253,7 @@ def read_forcing_geotiff_day(
     nodata=-9999.0,
     min_valid_fraction=0.01,
     variable_name="forcing",
+    file_index=None,
 ):
     """
     Read one daily forcing GeoTIFF from a folder.
@@ -222,23 +287,34 @@ def read_forcing_geotiff_day(
     date_string_dash = date.strftime("%Y-%m-%d")
     date_string_compact = date.strftime("%Y%m%d")
 
-    candidate_files = sorted(
-        list(geotiff_folder.glob(f"*{date_string_dash}*.tif"))
-        + list(geotiff_folder.glob(f"*{date_string_compact}*.tif"))
-    )
-
-    if not candidate_files:
-        raise FileNotFoundError(
-            f"No forcing GeoTIFF found in {geotiff_folder} for date {date_string_dash}"
+    if file_index is not None:
+        geotiff_path = (
+            file_index.get(date_string_dash)
+            or file_index.get(date_string_compact)
         )
 
-    if len(candidate_files) > 1:
-        print(
-            f"Warning: multiple GeoTIFFs found for {date_string_dash}. "
-            f"Using: {candidate_files[0]}"
+        if geotiff_path is None:
+            raise FileNotFoundError(
+                f"No forcing GeoTIFF found in {geotiff_folder} for date {date_string_dash}"
+            )
+    else:
+        candidate_files = sorted(
+            list(geotiff_folder.glob(f"*{date_string_dash}*.tif"))
+            + list(geotiff_folder.glob(f"*{date_string_compact}*.tif"))
         )
 
-    geotiff_path = candidate_files[0]
+        if not candidate_files:
+            raise FileNotFoundError(
+                f"No forcing GeoTIFF found in {geotiff_folder} for date {date_string_dash}"
+            )
+
+        if len(candidate_files) > 1:
+            print(
+                f"Warning: multiple GeoTIFFs found for {date_string_dash}. "
+                f"Using: {candidate_files[0]}"
+            )
+
+        geotiff_path = candidate_files[0]
 
     with rasterio.open(geotiff_path) as src:
         data = src.read(1).astype(np.float32)
