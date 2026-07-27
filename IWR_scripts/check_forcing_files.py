@@ -27,6 +27,33 @@ from pathlib import Path
 import numpy as np
 import rasterio
 
+_MISSING = object()
+
+
+def _nested_get(config, path, default=_MISSING):
+    current = config
+    for key in path.split("."):
+        if not isinstance(current, dict) or key not in current:
+            return default
+        current = current[key]
+    return current
+
+
+def _cfg_get(config, nested_path, fallback_keys=(), default=_MISSING):
+    value = _nested_get(config, nested_path, default=_MISSING)
+    if value is not _MISSING:
+        return value
+
+    for key in fallback_keys:
+        if key in config:
+            return config[key]
+
+    if default is not _MISSING:
+        return default
+
+    tried = [nested_path, *fallback_keys]
+    raise KeyError(f"Missing required config key(s): {tried}")
+
 # ---------------------------------------------------------------------------
 # Helpers (local copies so the script can run standalone)
 # ---------------------------------------------------------------------------
@@ -128,13 +155,50 @@ def main():
     with open(config_path) as fh:
         config = json.load(fh)
 
-    nodata                  = -9999.0
-    max_precip              = config.get("max_precipitation_mm_day", 300)
-    max_et0                 = config.get("max_et0_mm_day", 20)
-    min_valid_pct           = config.get("min_valid_forcing_fraction", 0.01) * 100.0
-    precip_folder           = config.get("precipitation_geotiff_folder") or config.get("precipitation_folder")
-    et0_folder              = config.get("et0_geotiff_folder") or config.get("et0_folder")
-    output_folder           = Path(config.get("iwr_output_folder", "."))
+    nodata = -9999.0
+    max_precip = _cfg_get(
+        config,
+        "options.max_precipitation_mm_day",
+        fallback_keys=("max_precipitation_mm_day",),
+        default=300,
+    )
+    max_et0 = _cfg_get(
+        config,
+        "options.max_et0_mm_day",
+        fallback_keys=("max_et0_mm_day",),
+        default=20,
+    )
+    min_valid_pct = _cfg_get(
+        config,
+        "options.min_valid_forcing_fraction",
+        fallback_keys=("min_valid_forcing_fraction",),
+        default=0.01,
+    ) * 100.0
+    precip_folder = _cfg_get(
+        config,
+        "datasets.forcing.precipitation_geotiff_folder",
+        fallback_keys=("precipitation_geotiff_folder", "precipitation_folder"),
+        default=None,
+    )
+    et0_folder = _cfg_get(
+        config,
+        "datasets.forcing.et0_geotiff_folder",
+        fallback_keys=("et0_geotiff_folder", "et0_folder"),
+        default=None,
+    )
+
+    explicit_output_folder = _cfg_get(
+        config,
+        "outputs.iwr_output_folder",
+        fallback_keys=("iwr_output_folder",),
+        default=None,
+    )
+    if explicit_output_folder is not None:
+        output_folder = Path(explicit_output_folder)
+    else:
+        output_base = _cfg_get(config, "outputs.output_base", fallback_keys=("output_base",), default=None)
+        run_name = _cfg_get(config, "outputs.run_name", fallback_keys=("run_name",), default=None)
+        output_folder = Path(output_base) / run_name if output_base and run_name else Path(".")
 
     print("=" * 70)
     print("FORCING FILE DIAGNOSTIC SCAN")

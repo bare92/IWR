@@ -1,40 +1,51 @@
 {
-  "start_date": "1991-01-01",
-  "end_date": "2026-04-30",
-
-  "irrigated_areas_path": "/share/data/DAO/static/processed/distretti_irrigui_SIGRIAN_3035_1km_mask_aligned.tif",
-  "valid_mask_path": "/share/data/DAO/static/processed/working_grid_3035_1km_precip_valid.tif",
-  "soil_texture_path": "/share/data/DAO/static/processed/soil_texture_aligned.tif",
-
-  "phenology_paths": {
-    "phenoe1": "/share/data/DAO/static/processed/phenoe1_v04_aligned.tif",
-    "phenoe2": "/share/data/DAO/static/processed/phenoe2_v04_aligned.tif",
-    "phenom1": "/share/data/DAO/static/processed/phenom1_v04_aligned.tif",
-    "phenom2": "/share/data/DAO/static/processed/phenom2_v04_aligned.tif",
-    "phenonseasons": "/share/data/DAO/static/processed/phenonseasons_v04_aligned.tif",
-    "phenos1": "/share/data/DAO/static/processed/phenos1_v04_aligned.tif",
-    "phenos2": "/share/data/DAO/static/processed/phenos2_v04_aligned.tif",
-    "phenosen1": "/share/data/DAO/static/processed/phenosen1_v04_aligned.tif",
-    "phenosen2": "/share/data/DAO/static/processed/phenosen2_v04_aligned.tif"
+  "time": {
+    "start_date": "1991-01-01",
+    "end_date": "2026-04-30"
   },
 
-  "precipitation_geotiff_folder": "/share/data/DAO/input/output_geotiffs_micromet/P",
-  "et0_geotiff_folder": "/share/data/DAO/input/output_geotiffs_micromet/PET",
+  "datasets": {
+    "static": {
+      "irrigated_areas_path": "/share/data/DAO/static/processed/distretti_irrigui_SIGRIAN_3035_1km_mask_aligned.tif",
+      "valid_mask_path": "/share/data/DAO/static/processed/working_grid_3035_1km_precip_valid.tif",
+      "soil_texture_path": "/share/data/DAO/static/processed/soil_texture_aligned.tif",
+      "phenology_paths": {
+        "phenoe1": "/share/data/DAO/static/processed/phenoe1_v04_aligned.tif",
+        "phenoe2": "/share/data/DAO/static/processed/phenoe2_v04_aligned.tif",
+        "phenom1": "/share/data/DAO/static/processed/phenom1_v04_aligned.tif",
+        "phenom2": "/share/data/DAO/static/processed/phenom2_v04_aligned.tif",
+        "phenonseasons": "/share/data/DAO/static/processed/phenonseasons_v04_aligned.tif",
+        "phenos1": "/share/data/DAO/static/processed/phenos1_v04_aligned.tif",
+        "phenos2": "/share/data/DAO/static/processed/phenos2_v04_aligned.tif",
+        "phenosen1": "/share/data/DAO/static/processed/phenosen1_v04_aligned.tif",
+        "phenosen2": "/share/data/DAO/static/processed/phenosen2_v04_aligned.tif"
+      },
+      "crop": {
+        "crop_fraction_path": "/share/data/DAO/AIDA/italy_areas_irrigated_DAO_1km_clipped.tif",
+        "crop_parameters_csv": "/share/data/DAO/static/processed/crop_parameters_aida_irrigated.csv"
+      }
+    },
 
-  "soil_output_folder": "/share/data/DAO/static/processed/soil_parameters",
+    "forcing": {
+      "precipitation_geotiff_folder": "/share/data/DAO/input/output_geotiffs_micromet/P",
+      "et0_geotiff_folder": "/share/data/DAO/input/output_geotiffs_micromet/PET"
+    }
+  },
 
-  "output_base": "/share/data/DAO/output_eraLand",
-  "run_name": "IWR",
+  "outputs": {
+    "soil_output_folder": "/share/data/DAO/static/processed/soil_parameters",
+    "output_base": "/share/data/DAO/output_eraLand",
+    "run_name": "IWR"
+  },
 
-  "crop_fraction_path": "/share/data/DAO/AIDA/italy_areas_irrigated_DAO_1km_clipped.tif",
-  "crop_parameters_csv": "/share/data/DAO/static/processed/crop_parameters_aida_irrigated.csv",
-
-  "strict_checks": false,
-  "write_debug_csv": false,
-  "write_cumulative_iwr": true,
-  "debug_mode": false,
-  "max_precipitation_mm_day": 350,
-  "max_et0_mm_day": 20,
-  "max_iwr_mm_day": 100,
-  "min_valid_forcing_fraction": 0.01
+  "options": {
+    "strict_checks": false,
+    "write_debug_csv": false,
+    "write_cumulative_iwr": true,
+    "debug_mode": false,
+    "max_precipitation_mm_day": 350,
+    "max_et0_mm_day": 20,
+    "max_iwr_mm_day": 100,
+    "min_valid_forcing_fraction": 0.01
+  }
 }
