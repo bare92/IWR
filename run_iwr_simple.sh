@@ -11,7 +11,7 @@ unset PYTHONPATH
 
 PYTHON="$PROJECT_DIR/.venv/bin/python"
 SCRIPT_PATH="$PROJECT_DIR/IWR_scripts/iwr_simple_main.py"
-DEFAULT_CONFIG="$PROJECT_DIR/IWR_scripts/config/config_eraL.json"
+DEFAULT_CONFIG="$PROJECT_DIR/IWR_scripts/config/config_eraL_theoretical_rainfed.json"
 CONFIG_PATH="${1:-$DEFAULT_CONFIG}"
 
 if [[ ! -x "$PYTHON" ]]; then

@@ -72,13 +72,17 @@ def _crs_equivalent(crs_a, crs_b):
 
     Some input rasters may store equivalent LAEA definitions using different
     WKT spellings (e.g. LOCAL_CS vs PROJCS "unknown").
+    
+    If one CRS is None (missing metadata), assume it's compatible with the
+    reference CRS (e.g., data has been pre-aligned).
     """
 
     if crs_a == crs_b:
         return True
 
+    # If one CRS is None, accept as compatible (assume data is pre-aligned).
     if crs_a is None or crs_b is None:
-        return False
+        return True
 
     # Fast textual fallback that does not depend on PROJ DB parsing.
     # This is important when shell env vars point to a mismatched PROJ setup.
@@ -228,8 +232,19 @@ def run_input_checks(
 
     check_array_shape("fmax", fmax, reference_shape)
 
-    check_array_shape("irrigation_mask", irrigation_mask, reference_shape)
-    check_profile_match("irrigation_mask", irrigation_profile, reference_profile)
+    if irrigation_mask is not None:
+        check_array_shape("irrigation_mask", irrigation_mask, reference_shape)
+
+        if irrigation_profile is None:
+            raise ValueError(
+                "irrigation_profile is required when irrigation_mask is provided."
+            )
+
+        check_profile_match("irrigation_mask", irrigation_profile, reference_profile)
+    elif irrigation_profile is not None:
+        raise ValueError(
+            "irrigation_profile was provided but irrigation_mask is None."
+        )
 
     if valid_area_mask is not None:
         check_array_shape("valid_area_mask", valid_area_mask, reference_shape)

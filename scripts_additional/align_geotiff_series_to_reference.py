@@ -31,7 +31,7 @@ from rasterio.warp import Resampling, reproject
 # ============================================================
 
 # Reference raster that defines target CRS, transform, width and height.
-REFERENCE_MAP = Path("/home/fremen/data/projects/Burkina/Data_iwr/static/burkina_valid_mask.tif")
+REFERENCE_MAP = Path("/home/fremen/data/projects/Burkina/00_Data_iwr/static/burkina_valid_mask.tif")
 
 # List of GeoTIFFs to align.
 # INPUT_GEOTIFFS = [
@@ -43,7 +43,7 @@ INPUT_GEOTIFFS = [
       glob.glob("/home/fremen/data/basedata/WORLD/ASAP_pheno/pheno*.tif")]  # Example: align all .tif files in a folder
 
 # Folder where aligned rasters will be written.
-OUTPUT_FOLDER = Path("/home/fremen/data/projects/Burkina/Data_iwr/static")
+OUTPUT_FOLDER = Path("/home/fremen/data/projects/Burkina/00_Data_iwr/static")
 
 # Optional nodata override used for both input and output nodata handling.
 # Set to None to use each source file nodata as-is.

@@ -1,0 +1,55 @@
+{
+  "time": {
+    "start_date": "1991-01-01",
+    "end_date": "2026-04-30"
+  },
+
+  "datasets": {
+    "static": {
+      "irrigated_areas_path": null,
+      "valid_mask_path": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/burkina_valid_mask.tif",
+      "soil_texture_path": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/burkina_usda_texture_filled.tif",
+      "phenology_paths": {
+        "phenoe1": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/phenoe1_v04_aligned.tif",
+        "phenoe2": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/phenoe2_v04_aligned.tif",
+        "phenom1": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/phenom1_v04_aligned.tif",
+        "phenom2": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/phenom2_v04_aligned.tif",
+        "phenonseasons": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/phenonseasons_v04_aligned.tif",
+        "phenos1": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/phenos1_v04_aligned.tif",
+        "phenos2": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/phenos2_v04_aligned.tif",
+        "phenosen1": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/phenosen1_v04_aligned.tif",
+        "phenosen2": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/phenosen2_v04_aligned.tif"
+      },
+      "crop": {
+        "crop_fraction_path": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/crop_percentages_burkina.tif",
+        "crop_parameters_csv": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/crop_parameters_burkina.csv"
+      }
+    },
+
+    "forcing": {
+      "precipitation_geotiff_folder": "/home/fremen/data/projects/Burkina/00_Data_iwr/forcings/P",
+      "et0_geotiff_folder": "/home/fremen/data/projects/Burkina/00_Data_iwr/forcings/PET"
+    }
+  },
+
+  "outputs": {
+    "soil_output_folder": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/processed/soil_parameters",
+    "output_base": "/home/fremen/data/projects/Burkina/00_Data_iwr/iwr_output",
+    "run_name": "IWR_theoretical_rainfed"
+  },
+
+  "options": {
+    "strict_checks": false,
+    "write_debug_csv": false,
+    "write_cumulative_iwr": true,
+    "debug_mode": false,
+    "max_precipitation_mm_day": 350,
+    "max_et0_mm_day": 20,
+    "max_iwr_mm_day": 100,
+    "min_valid_forcing_fraction": 0.01,
+    "iwr_mode": "theoretical_net_irrigation",
+    "iwr_domain": "all_cropped",
+    "theoretical_iwr_target": "stress_threshold",
+    "initial_soil_moisture_fraction": 0.5
+  }
+}

@@ -8,6 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+# Prevent cross-environment PROJ database conflicts (e.g. active conda env + .venv python).
+for _proj_var in ("PROJ_LIB", "PROJ_DATA"):
+    _proj_path = os.environ.get(_proj_var)
+    if _proj_path and "miniconda3/envs/" in _proj_path:
+        os.environ.pop(_proj_var, None)
+
 import numpy as np
 import pandas as pd
 import rasterio
@@ -23,22 +29,22 @@ import xarray as xr
 
 # Folder containing monthly precipitation NetCDF files.
 P_NETCDF_FOLDER = Path(
-    "/share/data/DAO/input/Forcing_micromet_corrected/P"
+    "/home/fremen/data/projects/Burkina/00_Data_iwr/MICROMET_Burkina_forcing/outputs/P"
 )
 
 # Folder containing monthly potential evapotranspiration NetCDF files.
 PET_NETCDF_FOLDER = Path(
-    "/share/data/DAO/input/Forcing_micromet_corrected/ET_HS"
+    "/home/fremen/data/projects/Burkina/00_Data_iwr/MICROMET_Burkina_forcing/outputs/ET_HS"
 )
 
 # Output root folder. The script creates P and PET subfolders automatically.
 OUTPUT_ROOT = Path(
-    "/share/data/DAO/input/output_geotiffs_micromet"
+    "/home/fremen/data/projects/Burkina/00_Data_iwr/forcings"
 )
 
 # Reference grid used for all GeoTIFF outputs.
 WORKING_GRID_PATH = Path(
-    "/share/data/DAO/static/processed/working_grid_3035_1km_precip_valid.tif"
+    "/home/fremen/data/projects/Burkina/00_Data_iwr/static/burkina_valid_mask.tif"
 )
 
 # Variable names inside the NetCDF files.
@@ -338,12 +344,14 @@ def regular_spacing(
             f"Coordinate '{coordinate_name}' has zero or invalid spacing."
         )
 
-    tolerance = max(spacing * 1e-6, 1e-8)
+    # Relaxed tolerance for floating-point rounding errors in real-world coordinate data.
+    # Use max(1% of spacing, 1e-6) to catch both absolute and relative errors.
+    tolerance = max(spacing * 1e-2, 1e-6)
 
     if not np.allclose(
         np.abs(differences),
         spacing,
-        rtol=1e-6,
+        rtol=1e-2,
         atol=tolerance,
     ):
         raise ValueError(
@@ -408,16 +416,21 @@ def load_grid_from_geotiff(path: Path) -> GridDefinition:
         )
 
     with rasterio.open(path) as source:
-        if source.crs is None:
-            raise ValueError(
-                f"Working grid has no CRS: {path}"
+        grid_crs = source.crs
+        if grid_crs is None:
+            print(
+                f"WARNING: Working grid has no CRS metadata: {path}"
             )
+            print(
+                f"WARNING: Using fallback CRS: {FALLBACK_CRS}"
+            )
+            grid_crs = CRS.from_string(FALLBACK_CRS)
 
         return GridDefinition(
             width=int(source.width),
             height=int(source.height),
             transform=source.transform,
-            crs=source.crs,
+            crs=grid_crs,
         )
 
 

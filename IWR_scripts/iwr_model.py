@@ -14,6 +14,203 @@ from phenology_functions import (
 )
 
 
+IWR_MODE_WATNEEDS_BLUE_ET = "watneeds_blue_et"
+IWR_MODE_THEORETICAL_NET_IRRIGATION = "theoretical_net_irrigation"
+
+IWR_DOMAIN_IRRIGATED = "irrigated"
+IWR_DOMAIN_NON_IRRIGATED = "non_irrigated"
+IWR_DOMAIN_ALL_CROPPED = "all_cropped"
+
+THEORETICAL_IWR_TARGET_STRESS_THRESHOLD = "stress_threshold"
+THEORETICAL_IWR_TARGET_FIELD_CAPACITY = "field_capacity"
+
+VALID_IWR_MODES = {
+    IWR_MODE_WATNEEDS_BLUE_ET,
+    IWR_MODE_THEORETICAL_NET_IRRIGATION,
+}
+
+VALID_IWR_DOMAINS = {
+    IWR_DOMAIN_IRRIGATED,
+    IWR_DOMAIN_NON_IRRIGATED,
+    IWR_DOMAIN_ALL_CROPPED,
+}
+
+VALID_THEORETICAL_IWR_TARGETS = {
+    THEORETICAL_IWR_TARGET_STRESS_THRESHOLD,
+    THEORETICAL_IWR_TARGET_FIELD_CAPACITY,
+}
+
+
+def normalize_iwr_configuration(
+    iwr_mode,
+    iwr_domain,
+    theoretical_iwr_target,
+):
+    mode = (iwr_mode or IWR_MODE_WATNEEDS_BLUE_ET).strip().lower()
+    target = (theoretical_iwr_target or THEORETICAL_IWR_TARGET_STRESS_THRESHOLD).strip().lower()
+
+    if mode not in VALID_IWR_MODES:
+        raise ValueError(
+            f"Unsupported iwr_mode '{iwr_mode}'. "
+            f"Valid values: {sorted(VALID_IWR_MODES)}"
+        )
+
+    if target not in VALID_THEORETICAL_IWR_TARGETS:
+        raise ValueError(
+            f"Unsupported theoretical_iwr_target '{theoretical_iwr_target}'. "
+            f"Valid values: {sorted(VALID_THEORETICAL_IWR_TARGETS)}"
+        )
+
+    if iwr_domain is None or str(iwr_domain).strip() == "":
+        if mode == IWR_MODE_WATNEEDS_BLUE_ET:
+            domain = IWR_DOMAIN_IRRIGATED
+        else:
+            domain = IWR_DOMAIN_ALL_CROPPED
+    else:
+        domain = str(iwr_domain).strip().lower()
+
+    if domain not in VALID_IWR_DOMAINS:
+        raise ValueError(
+            f"Unsupported iwr_domain '{iwr_domain}'. "
+            f"Valid values: {sorted(VALID_IWR_DOMAINS)}"
+        )
+
+    if mode == IWR_MODE_WATNEEDS_BLUE_ET and domain != IWR_DOMAIN_IRRIGATED:
+        raise ValueError(
+            "iwr_mode='watneeds_blue_et' only supports iwr_domain='irrigated'."
+        )
+
+    return mode, domain, target
+
+
+def create_iwr_domain_mask(
+    iwr_domain,
+    valid_area_pixels,
+    irrigation_mask=None,
+    nodata=-9999.0,
+):
+    if iwr_domain == IWR_DOMAIN_ALL_CROPPED:
+        return valid_area_pixels.astype(bool)
+
+    if irrigation_mask is None:
+        raise ValueError(
+            f"iwr_domain='{iwr_domain}' requires a valid irrigation_mask raster."
+        )
+
+    irrigation_valid = (
+        np.isfinite(irrigation_mask)
+        & (irrigation_mask != nodata)
+    )
+
+    if iwr_domain == IWR_DOMAIN_IRRIGATED:
+        return (irrigation_mask == 1) & irrigation_valid & valid_area_pixels
+
+    if iwr_domain == IWR_DOMAIN_NON_IRRIGATED:
+        return (irrigation_mask != 1) & irrigation_valid & valid_area_pixels
+
+    raise ValueError(f"Unsupported iwr_domain '{iwr_domain}'.")
+
+
+def create_theoretical_iwr_target_storage(
+    raw,
+    total_available_water_pixel,
+    theoretical_iwr_target,
+    nodata=-9999.0,
+):
+    target_storage = np.full_like(raw, nodata, dtype=np.float32)
+
+    valid_mask = (
+        np.isfinite(raw)
+        & np.isfinite(total_available_water_pixel)
+        & (raw != nodata)
+        & (total_available_water_pixel != nodata)
+        & (total_available_water_pixel >= 0)
+    )
+
+    if theoretical_iwr_target == THEORETICAL_IWR_TARGET_STRESS_THRESHOLD:
+        target_storage[valid_mask] = raw[valid_mask]
+    elif theoretical_iwr_target == THEORETICAL_IWR_TARGET_FIELD_CAPACITY:
+        target_storage[valid_mask] = total_available_water_pixel[valid_mask]
+    else:
+        raise ValueError(
+            f"Unsupported theoretical_iwr_target '{theoretical_iwr_target}'."
+        )
+
+    target_storage[valid_mask] = np.clip(
+        target_storage[valid_mask],
+        0.0,
+        total_available_water_pixel[valid_mask],
+    )
+
+    return target_storage.astype(np.float32)
+
+
+def compute_theoretical_net_irrigation_requirement(
+    soil_moisture_previous,
+    precipitation_effective,
+    potential_evapotranspiration,
+    deep_percolation,
+    runoff,
+    target_storage,
+    total_available_water_pixel,
+    demand_mask,
+    nodata=-9999.0,
+    valid_mask=None,
+):
+    theoretical_iwr = np.full_like(soil_moisture_previous, nodata, dtype=np.float32)
+    soil_moisture_new = np.full_like(soil_moisture_previous, nodata, dtype=np.float32)
+    pre_irrigation_storage = np.full_like(soil_moisture_previous, nodata, dtype=np.float32)
+
+    reference_valid = (
+        np.isfinite(soil_moisture_previous)
+        & np.isfinite(precipitation_effective)
+        & np.isfinite(potential_evapotranspiration)
+        & np.isfinite(deep_percolation)
+        & np.isfinite(runoff)
+        & np.isfinite(target_storage)
+        & np.isfinite(total_available_water_pixel)
+        & (soil_moisture_previous != nodata)
+        & (precipitation_effective != nodata)
+        & (potential_evapotranspiration != nodata)
+        & (deep_percolation != nodata)
+        & (runoff != nodata)
+        & (target_storage != nodata)
+        & (total_available_water_pixel != nodata)
+        & (total_available_water_pixel >= 0)
+    )
+
+    if valid_mask is not None:
+        reference_valid = reference_valid & valid_mask
+
+    pre_irrigation_storage[reference_valid] = (
+        soil_moisture_previous[reference_valid]
+        + precipitation_effective[reference_valid]
+        - potential_evapotranspiration[reference_valid]
+        - deep_percolation[reference_valid]
+        - runoff[reference_valid]
+    ).astype(np.float32)
+
+    theoretical_iwr[reference_valid] = 0.0
+
+    irrigation_demand_mask = reference_valid & demand_mask
+    theoretical_iwr[irrigation_demand_mask] = np.maximum(
+        target_storage[irrigation_demand_mask] - pre_irrigation_storage[irrigation_demand_mask],
+        0.0,
+    )
+
+    soil_moisture_new[reference_valid] = np.clip(
+        pre_irrigation_storage[reference_valid] + theoretical_iwr[reference_valid],
+        0.0,
+        total_available_water_pixel[reference_valid],
+    ).astype(np.float32)
+
+    return (
+        theoretical_iwr.astype(np.float32),
+        soil_moisture_new.astype(np.float32),
+        pre_irrigation_storage.astype(np.float32),
+    )
+
+
 def prepare_crop_fractions(crop_fraction_data):
     """
     Prepare crop fractions.
@@ -653,6 +850,7 @@ def write_active_pixel_mask_geotiff(
     data,
     profile,
     date=None,
+    iwr_domain=None,
 ):
     """
     Write one daily active-pixel mask as uint8 GeoTIFF.
@@ -679,12 +877,19 @@ def write_active_pixel_mask_geotiff(
     if profile.get("transform") is not None:
         mask_profile["transform"] = profile["transform"]
 
+    description = (
+        "1=phenology_active+crop_fraction>0+selected_iwr_domain+valid_area, "
+        "0=inactive/nodata"
+    )
+
     tags = {
         "variable": "active_pixel_mask",
-        "description": "1=phenology_active+crop_fraction>0+irrigation_mask=1+valid_area, 0=inactive/nodata",
+        "description": description,
     }
     if date is not None:
         tags["date"] = date.strftime("%Y-%m-%d")
+    if iwr_domain is not None:
+        tags["iwr_domain"] = str(iwr_domain)
 
     with rasterio.open(output_path, "w", **mask_profile) as dst:
         dst.write(data.astype(np.uint8), 1)
@@ -973,6 +1178,10 @@ def run_iwr_model(
     max_iwr_mm_day=100,
     min_valid_forcing_fraction=0.01,
     debug_csv_frequency_days=1,
+    iwr_mode=IWR_MODE_WATNEEDS_BLUE_ET,
+    iwr_domain=None,
+    theoretical_iwr_target=THEORETICAL_IWR_TARGET_STRESS_THRESHOLD,
+    initial_soil_moisture_fraction=0.5,
 ):
     """
     Run daily IWR water balance using the cropped-area-depth convention.
@@ -981,9 +1190,12 @@ def run_iwr_model(
     - P_eff = 0.95 * P (mm/day over cropped area).
     - Kc_pixel = sum(f_i * Kc_i) / sum(f_i) — average Kc over the cropped fraction.
     - TAW and RAW are in mm of water over the cropped root zone.
-    - Daily IWR is the WATNEEDS-like blue water requirement:
-          IWR = max(ETc - ET_green, 0)
-      on irrigated pixels only.
+    - The model supports two IWR modes:
+        watneeds_blue_et:
+            IWR = max(ETc - ET_green, 0) on irrigated pixels only.
+        theoretical_net_irrigation:
+            IWR is the reference-state net irrigation needed to restore
+            selected target storage after ETc and non-ET losses.
     - ET_green is the actual ET supplied by green water (rainfall + stored green moisture),
       computed using a stress coefficient based on green soil moisture.
     - Output mm values must be converted to volume using irrigated crop area,
@@ -995,7 +1207,7 @@ def run_iwr_model(
     - Daily irrigation maps are written as GeoTIFFs if output_folder is provided.
     - Computation is restricted to valid_area_mask == 1.
         - Before writing daily IWR, pixels that are not active are set to nodata.
-            Active means: phenology active AND crop fraction > 0 AND irrigation_mask == 1
+            Active means: phenology active AND crop fraction > 0 AND selected IWR domain
             AND valid area.
         - Optional uint8 active-pixel mask files can still be written with
             write_active_pixel_masks=True.
@@ -1003,6 +1215,25 @@ def run_iwr_model(
 
     crop_fraction_data, crop_fraction_sum = prepare_crop_fractions(
         crop_fraction_data=crop_fraction_data,
+    )
+
+    iwr_mode, iwr_domain, theoretical_iwr_target = normalize_iwr_configuration(
+        iwr_mode=iwr_mode,
+        iwr_domain=iwr_domain,
+        theoretical_iwr_target=theoretical_iwr_target,
+    )
+
+    if not (0.0 <= float(initial_soil_moisture_fraction) <= 1.0):
+        raise ValueError(
+            "initial_soil_moisture_fraction must be in the range [0, 1]."
+        )
+
+    print(
+        "IWR configuration:",
+        f"mode={iwr_mode},",
+        f"domain={iwr_domain},",
+        f"target={theoretical_iwr_target},",
+        f"initial_soil_moisture_fraction={float(initial_soil_moisture_fraction):.3f}",
     )
 
     total_available_water_pixel = create_total_available_water_pixel(
@@ -1046,18 +1277,38 @@ def run_iwr_model(
 
     soil_moisture = initialize_soil_moisture(
         total_available_water_pixel=total_available_water_pixel,
-        initial_fraction=0.5,
+        initial_fraction=float(initial_soil_moisture_fraction),
         nodata=nodata,
     )
 
     valid_area_pixels = np.isfinite(valid_area_mask) & (valid_area_mask == 1)
 
-    irrigated_pixels = (irrigation_mask == 1) & valid_area_pixels
+    iwr_domain_pixels = create_iwr_domain_mask(
+        iwr_domain=iwr_domain,
+        valid_area_pixels=valid_area_pixels,
+        irrigation_mask=irrigation_mask,
+        nodata=nodata,
+    )
+
+    theoretical_target_storage = create_theoretical_iwr_target_storage(
+        raw=raw,
+        total_available_water_pixel=total_available_water_pixel,
+        theoretical_iwr_target=theoretical_iwr_target,
+        nodata=nodata,
+    )
 
     cumulative_irrigation = np.zeros_like(soil_moisture, dtype=np.float32)
-    soil_moisture_green = soil_moisture.copy()
+    # Actual state used by the water balance (rainfed-only in theoretical mode).
+    soil_moisture_actual = soil_moisture
+
+    if iwr_mode == IWR_MODE_THEORETICAL_NET_IRRIGATION:
+        soil_moisture_reference = theoretical_target_storage.copy()
+    else:
+        soil_moisture_reference = soil_moisture_actual.copy()
+
+    soil_moisture_green = soil_moisture_actual.copy()
     soil_moisture_blue = np.zeros_like(soil_moisture, dtype=np.float32)
-    soil_moisture_blue[soil_moisture == nodata] = nodata
+    soil_moisture_blue[soil_moisture_actual == nodata] = nodata
 
     cumulative_green_et = np.zeros_like(soil_moisture, dtype=np.float32)
     cumulative_blue_et = np.zeros_like(soil_moisture, dtype=np.float32)
@@ -1066,7 +1317,8 @@ def run_iwr_model(
     cumulative_green_runoff = np.zeros_like(soil_moisture, dtype=np.float32)
     cumulative_blue_runoff = np.zeros_like(soil_moisture, dtype=np.float32)
 
-    static_valid_mask = (soil_moisture != nodata) & valid_area_pixels
+    static_valid_mask = (soil_moisture_actual != nodata) & valid_area_pixels
+    cumulative_static_mask = static_valid_mask & iwr_domain_pixels & (crop_fraction_sum > 0)
     daily_stats_rows = []
 
     # Prepare active-pixel-mask output folder at the same level as output_folder.
@@ -1153,7 +1405,7 @@ def run_iwr_model(
         model_valid_mask = (
             forcing_valid_mask
             & valid_area_pixels
-            & (soil_moisture != nodata)
+            & (soil_moisture_actual != nodata)
             & (total_available_water_pixel != nodata)
             & (raw != nodata)
             & (fmax_pixel != nodata)
@@ -1234,35 +1486,34 @@ def run_iwr_model(
         blue_iwr_watneeds = compute_blue_water_requirement_watneeds(
             potential_evapotranspiration=potential_evapotranspiration,
             green_evapotranspiration=green_evapotranspiration_watneeds,
-            irrigated_pixels=irrigated_pixels,
+            irrigated_pixels=iwr_domain_pixels,
             nodata=nodata,
             valid_mask=model_valid_mask,
         )
 
-        # Actual ET for the soil water balance:
-        # - irrigated pixels: potential ETc (blue water covers the gap)
-        # - non-irrigated pixels: green/rainfed stressed ET
         actual_evapotranspiration_for_balance = np.full_like(
             potential_evapotranspiration,
             nodata,
             dtype=np.float32,
         )
-
         actual_evapotranspiration_for_balance[model_valid_mask] = (
             green_evapotranspiration_watneeds[model_valid_mask]
         )
 
-        irrigated_valid = model_valid_mask & irrigated_pixels
-
-        actual_evapotranspiration_for_balance[irrigated_valid] = (
-            potential_evapotranspiration[irrigated_valid]
-        )
+        if iwr_mode == IWR_MODE_WATNEEDS_BLUE_ET:
+            irrigated_valid = model_valid_mask & iwr_domain_pixels
+            actual_evapotranspiration_for_balance[irrigated_valid] = (
+                potential_evapotranspiration[irrigated_valid]
+            )
+            actual_irrigation_pixels = iwr_domain_pixels
+        else:
+            actual_irrigation_pixels = np.zeros_like(iwr_domain_pixels, dtype=bool)
 
         # ------------------------------------------------------------------ #
         # 8. Deep percolation                                                  #
         # ------------------------------------------------------------------ #
         deep_percolation = compute_deep_percolation(
-            soil_moisture_previous=soil_moisture,
+            soil_moisture_previous=soil_moisture_actual,
             raw=raw,
             total_available_water_pixel=total_available_water_pixel,
             fmax_pixel=fmax_pixel,
@@ -1271,11 +1522,11 @@ def run_iwr_model(
         )
 
         actual_evapotranspiration_for_balance, deep_percolation = scale_fluxes_if_water_deficit(
-            soil_moisture_previous=soil_moisture,
+            soil_moisture_previous=soil_moisture_actual,
             precipitation_effective=precipitation_effective,
             actual_evapotranspiration=actual_evapotranspiration_for_balance,
             deep_percolation=deep_percolation,
-            irrigated_pixels=irrigated_pixels,
+            irrigated_pixels=actual_irrigation_pixels,
             nodata=nodata,
             valid_mask=model_valid_mask,
         )
@@ -1289,14 +1540,14 @@ def run_iwr_model(
                 f"max={dp_display[r_dp, c_dp]:.2f} mm/day at row={r_dp}, col={c_dp}"
             )
             for label, val in [
-                ("soil_moisture_previous", soil_moisture[r_dp, c_dp]),
+                ("soil_moisture_actual_previous", soil_moisture_actual[r_dp, c_dp]),
                 ("raw", raw[r_dp, c_dp]),
                 ("total_available_water_pixel", total_available_water_pixel[r_dp, c_dp]),
                 ("fmax_pixel", fmax_pixel[r_dp, c_dp]),
                 ("deep_percolation", deep_percolation[r_dp, c_dp]),
                 ("precipitation_effective", precipitation_effective[r_dp, c_dp]),
                 ("actual_evapotranspiration_for_balance", actual_evapotranspiration_for_balance[r_dp, c_dp]),
-                ("irrigated_pixels", irrigated_pixels[r_dp, c_dp]),
+                ("actual_irrigation_pixels", actual_irrigation_pixels[r_dp, c_dp]),
             ]:
                 print(f"  {label:<30} = {val}")
 
@@ -1310,15 +1561,83 @@ def run_iwr_model(
                 0.0, 5000.0, nodata=nodata, date=current_date, raise_error=False,
             )
 
+        if iwr_mode == IWR_MODE_THEORETICAL_NET_IRRIGATION:
+            actual_irrigation_input = np.full_like(
+                potential_evapotranspiration,
+                nodata,
+                dtype=np.float32,
+            )
+            actual_irrigation_input[model_valid_mask] = 0.0
+        else:
+            actual_irrigation_input = blue_iwr_watneeds
+
         # ------------------------------------------------------------------ #
-        # 9. Irrigation (WATNEEDS-like blue water requirement)                 #
+        # 9. Irrigation output variable                                        #
         # ------------------------------------------------------------------ #
-        irrigation = blue_iwr_watneeds
+        if iwr_mode == IWR_MODE_THEORETICAL_NET_IRRIGATION:
+            reference_valid_mask = (
+                forcing_valid_mask
+                & valid_area_pixels
+                & (crop_fraction_sum > 0)
+                & np.isfinite(soil_moisture_reference)
+                & np.isfinite(total_available_water_pixel)
+                & np.isfinite(raw)
+                & np.isfinite(fmax_pixel)
+                & (soil_moisture_reference != nodata)
+                & (total_available_water_pixel != nodata)
+                & (raw != nodata)
+                & (fmax_pixel != nodata)
+            )
+
+            reference_deep_percolation = compute_deep_percolation(
+                soil_moisture_previous=soil_moisture_reference,
+                raw=raw,
+                total_available_water_pixel=total_available_water_pixel,
+                fmax_pixel=fmax_pixel,
+                nodata=nodata,
+                valid_mask=reference_valid_mask,
+            )
+
+            reference_runoff = compute_subsurface_runoff(
+                soil_moisture_previous=soil_moisture_reference,
+                precipitation_effective=precipitation_effective,
+                actual_evapotranspiration=potential_evapotranspiration,
+                deep_percolation=reference_deep_percolation,
+                total_available_water_pixel=total_available_water_pixel,
+                nodata=nodata,
+                valid_mask=reference_valid_mask,
+            )
+
+            theoretical_demand_mask = (
+                reference_valid_mask
+                & iwr_domain_pixels
+                & (kc_pixel > 0)
+            )
+
+            irrigation, soil_moisture_reference, reference_pre_irrigation_storage = (
+                compute_theoretical_net_irrigation_requirement(
+                    soil_moisture_previous=soil_moisture_reference,
+                    precipitation_effective=precipitation_effective,
+                    potential_evapotranspiration=potential_evapotranspiration,
+                    deep_percolation=reference_deep_percolation,
+                    runoff=reference_runoff,
+                    target_storage=theoretical_target_storage,
+                    total_available_water_pixel=total_available_water_pixel,
+                    demand_mask=theoretical_demand_mask,
+                    nodata=nodata,
+                    valid_mask=reference_valid_mask,
+                )
+            )
+        else:
+            irrigation = blue_iwr_watneeds
+            reference_deep_percolation = np.full_like(irrigation, nodata, dtype=np.float32)
+            reference_runoff = np.full_like(irrigation, nodata, dtype=np.float32)
+            reference_pre_irrigation_storage = np.full_like(irrigation, nodata, dtype=np.float32)
 
         # ------------------------------------------------------------------ #
         # 10. Debug traceback for suspicious IWR                               #
         # ------------------------------------------------------------------ #
-        valid_irrigated_mask = model_valid_mask & irrigated_pixels
+        valid_irrigated_mask = model_valid_mask & iwr_domain_pixels
         valid_irrigation_vals = irrigation[valid_irrigated_mask]
         if valid_irrigation_vals.size > 0 and float(np.max(valid_irrigation_vals)) > max_iwr_mm_day:
             phenology_status = create_phenology_status_mask_from_date(
@@ -1345,12 +1664,17 @@ def run_iwr_model(
                 ("actual_ET_for_balance",           actual_evapotranspiration_for_balance[r, c]),
                 ("deep_percolation",                deep_percolation[r, c]),
                 ("blue_iwr_watneeds",               blue_iwr_watneeds[r, c]),
-                ("soil_moisture (prev)",            soil_moisture[r, c]),
+                ("soil_moisture_actual (prev)",     soil_moisture_actual[r, c]),
                 ("soil_moisture_green (prev)",      soil_moisture_green[r, c]),
+                ("soil_moisture_reference (prev)",  soil_moisture_reference[r, c]),
                 ("total_available_water",           total_available_water_pixel[r, c]),
                 ("raw",                             raw[r, c]),
                 ("fmax_pixel",                      fmax_pixel[r, c]),
-                ("irrigated_pixels",                irrigated_pixels[r, c]),
+                ("iwr_domain_pixels",               iwr_domain_pixels[r, c]),
+                ("actual_irrigation_input",         actual_irrigation_input[r, c]),
+                ("reference_pre_irrigation_storage", reference_pre_irrigation_storage[r, c]),
+                ("reference_deep_percolation",      reference_deep_percolation[r, c]),
+                ("reference_runoff",                reference_runoff[r, c]),
                 ("phenology_status",                phenology_status[r, c]),
             ]:
                 print(f"  {label:<30} = {val}")
@@ -1369,24 +1693,24 @@ def run_iwr_model(
 
         if debug_mode:
             runoff_balance_before_threshold = np.full_like(
-                soil_moisture,
+                soil_moisture_actual,
                 nodata,
                 dtype=np.float32,
             )
             runoff_excess_before_threshold = np.full_like(
-                soil_moisture,
+                soil_moisture_actual,
                 nodata,
                 dtype=np.float32,
             )
 
             runoff_balance_mask = (
                 model_valid_mask
-                & np.isfinite(soil_moisture)
+                & np.isfinite(soil_moisture_actual)
                 & np.isfinite(precipitation_effective)
                 & np.isfinite(actual_evapotranspiration_for_balance)
                 & np.isfinite(deep_percolation)
                 & np.isfinite(total_available_water_pixel)
-                & (soil_moisture != nodata)
+                & (soil_moisture_actual != nodata)
                 & (precipitation_effective != nodata)
                 & (actual_evapotranspiration_for_balance != nodata)
                 & (deep_percolation != nodata)
@@ -1394,7 +1718,7 @@ def run_iwr_model(
             )
 
             runoff_balance_before_threshold[runoff_balance_mask] = (
-                soil_moisture[runoff_balance_mask]
+                soil_moisture_actual[runoff_balance_mask]
                 + precipitation_effective[runoff_balance_mask]
                 - actual_evapotranspiration_for_balance[runoff_balance_mask]
                 - deep_percolation[runoff_balance_mask]
@@ -1406,7 +1730,7 @@ def run_iwr_model(
             ).astype(np.float32)
 
         runoff = compute_subsurface_runoff(
-            soil_moisture_previous=soil_moisture,
+            soil_moisture_previous=soil_moisture_actual,
             precipitation_effective=precipitation_effective,
             actual_evapotranspiration=actual_evapotranspiration_for_balance,
             deep_percolation=deep_percolation,
@@ -1430,38 +1754,38 @@ def run_iwr_model(
         blue_runoff = np.zeros_like(runoff, dtype=np.float32)
         blue_runoff[runoff == nodata] = nodata
 
-        soil_moisture = water_balance_step(
-            soil_moisture_previous=soil_moisture,
+        soil_moisture_actual = water_balance_step(
+            soil_moisture_previous=soil_moisture_actual,
             precipitation_effective=precipitation_effective,
             actual_evapotranspiration=actual_evapotranspiration_for_balance,
             deep_percolation=deep_percolation,
             runoff=runoff,
-            irrigation=irrigation,
+            irrigation=actual_irrigation_input,
             total_available_water_pixel=total_available_water_pixel,
             delta_t=1.0,
             nodata=nodata,
             valid_mask=model_valid_mask,
         )
 
-        # In the WATNEEDS approach, soil_moisture evolves as the green-water balance
-        # (blue water is consumed by ET on the same day and does not accumulate in storage).
-        soil_moisture_green = soil_moisture.copy()
-        soil_moisture_blue = np.zeros_like(soil_moisture, dtype=np.float32)
-        soil_moisture_blue[soil_moisture == nodata] = nodata
+        # The actual-state storage follows the realized water balance.
+        # In theoretical mode, it remains precipitation-only (no irrigation input).
+        soil_moisture_green = soil_moisture_actual.copy()
+        soil_moisture_blue = np.zeros_like(soil_moisture_actual, dtype=np.float32)
+        soil_moisture_blue[soil_moisture_actual == nodata] = nodata
 
-        soil_saturation = np.full_like(soil_moisture, nodata, dtype=np.float32)
+        soil_saturation = np.full_like(soil_moisture_actual, nodata, dtype=np.float32)
 
         saturation_mask = (
             model_valid_mask
-            & np.isfinite(soil_moisture)
+            & np.isfinite(soil_moisture_actual)
             & np.isfinite(total_available_water_pixel)
-            & (soil_moisture != nodata)
+            & (soil_moisture_actual != nodata)
             & (total_available_water_pixel != nodata)
             & (total_available_water_pixel > 0)
         )
 
         soil_saturation[saturation_mask] = (
-            soil_moisture[saturation_mask]
+            soil_moisture_actual[saturation_mask]
             / total_available_water_pixel[saturation_mask]
         ).astype(np.float32)
 
@@ -1477,7 +1801,7 @@ def run_iwr_model(
         active_pixel_mask = (
             (kc_pixel > 0)
             & (crop_fraction_sum > 0)
-            & (irrigation_mask == 1)
+            & iwr_domain_pixels
             & valid_area_pixels
             & (total_available_water_pixel != nodata)
         )
@@ -1487,16 +1811,31 @@ def run_iwr_model(
 
         if output_folder is not None and output_profile is not None:
             output_file = Path(output_folder) / f"iwr_{current_date.strftime('%Y%m%d')}.tif"
+
+            if iwr_mode == IWR_MODE_THEORETICAL_NET_IRRIGATION:
+                daily_metadata = {
+                    "variable": "daily_theoretical_net_irrigation_requirement",
+                    "units": "mm/day over cropped area",
+                    "iwr_mode": iwr_mode,
+                    "iwr_domain": iwr_domain,
+                    "actual_water_input": "effective_precipitation_only",
+                    "target_storage": theoretical_iwr_target,
+                }
+            else:
+                daily_metadata = {
+                    "variable": "daily_blue_water_requirement",
+                    "units": "mm/day over cropped/irrigated crop area",
+                    "iwr_mode": iwr_mode,
+                    "iwr_domain": iwr_domain,
+                }
+
             write_daily_geotiff(
                 output_path=output_file,
                 data=irrigation_to_write,
                 profile=output_profile,
                 nodata=nodata,
                 date=current_date,
-                metadata={
-                    "variable": "daily_blue_water_requirement",
-                    "units": "mm/day over cropped/irrigated crop area",
-                },
+                metadata=daily_metadata,
             )
 
         if active_pixel_masks_folder is not None and output_profile is not None:
@@ -1510,6 +1849,7 @@ def run_iwr_model(
                 data=active_pixel_data,
                 profile=output_profile,
                 date=current_date,
+                iwr_domain=iwr_domain,
             )
 
         if debug_mode and output_profile is not None:
@@ -1531,11 +1871,18 @@ def run_iwr_model(
                 debug_base_folder = Path(debug_output_folder)
 
             debug_outputs = [
+                ("kc_pixel", kc_pixel, "kc_pixel", "dimensionless"),
                 (
-                    "kc_pixel",
-                    kc_pixel,
-                    "kc_pixel",
-                    "dimensionless",
+                    "actual_soil_moisture",
+                    soil_moisture_actual,
+                    "actual_soil_moisture",
+                    "mm",
+                ),
+                (
+                    "actual_irrigation_input",
+                    actual_irrigation_input,
+                    "actual_irrigation_input",
+                    "mm/day",
                 ),
                 (
                     "actual_evapotranspiration_for_balance",
@@ -1544,16 +1891,37 @@ def run_iwr_model(
                     "mm/day",
                 ),
                 (
-                    "deep_percolation",
+                    "actual_deep_percolation",
                     deep_percolation,
-                    "deep_percolation",
+                    "actual_deep_percolation",
                     "mm/day",
                 ),
+                ("actual_runoff", runoff, "actual_runoff", "mm/day"),
+                ("reported_iwr", irrigation, "reported_iwr", "mm/day"),
                 (
-                    "runoff",
-                    runoff,
-                    "runoff",
+                    "reference_soil_moisture",
+                    soil_moisture_reference,
+                    "reference_soil_moisture",
+                    "mm",
+                ),
+                (
+                    "reference_pre_irrigation_storage",
+                    reference_pre_irrigation_storage,
+                    "reference_pre_irrigation_storage",
+                    "mm",
+                ),
+                (
+                    "reference_deep_percolation",
+                    reference_deep_percolation,
+                    "reference_deep_percolation",
                     "mm/day",
+                ),
+                ("reference_runoff", reference_runoff, "reference_runoff", "mm/day"),
+                (
+                    "theoretical_target_storage",
+                    theoretical_target_storage,
+                    "theoretical_target_storage",
+                    "mm",
                 ),
                 (
                     "runoff_balance_before_threshold",
@@ -1567,18 +1935,8 @@ def run_iwr_model(
                     "runoff_excess_before_threshold",
                     "mm",
                 ),
-                (
-                    "soil_saturation",
-                    soil_saturation,
-                    "soil_saturation",
-                    "fraction",
-                ),
-                (
-                    "raw_fraction_of_taw",
-                    raw_fraction_of_taw,
-                    "raw_fraction_of_taw",
-                    "fraction",
-                ),
+                ("soil_saturation", soil_saturation, "soil_saturation", "fraction"),
+                ("raw_fraction_of_taw", raw_fraction_of_taw, "raw_fraction_of_taw", "fraction"),
             ]
 
             for folder_name, data_array, variable_name, units in debug_outputs:
@@ -1598,6 +1956,8 @@ def run_iwr_model(
                         "variable": variable_name,
                         "units": units,
                         "debug_mode": "true",
+                        "iwr_mode": iwr_mode,
+                        "iwr_domain": iwr_domain,
                     },
                 )
 
@@ -1638,13 +1998,13 @@ def run_iwr_model(
 
         if strict_checks:
             assert_reasonable_range(
-                "soil_moisture", soil_moisture, 0.0, taw_max,
+                "soil_moisture", soil_moisture_actual, 0.0, taw_max,
                 nodata=nodata, date=current_date, raise_error=False,
             )
 
-        # Accumulate irrigation only over valid pixels.
+        # Accumulate irrigation only where daily IWR output is active.
         cumulative_irrigation += np.where(
-            model_valid_mask & (irrigation != nodata), irrigation, 0.0
+            active_pixel_mask & (irrigation != nodata), irrigation, 0.0
         ).astype(np.float32)
         cumulative_green_et += np.where(
             model_valid_mask & (green_et != nodata), green_et, 0.0
@@ -1676,6 +2036,8 @@ def run_iwr_model(
                     "date":               date_str,
                     "forcing_valid_pct":  round(forcing_valid_pct, 2),
                     "model_valid_pct":    round(model_valid_pct, 2),
+                    "iwr_mode":           iwr_mode,
+                    "iwr_domain":         iwr_domain,
                 }
                 for var_name, var_arr in [
                     ("precipitation",                         precipitation),
@@ -1690,10 +2052,15 @@ def run_iwr_model(
                     ("actual_evapotranspiration_for_balance", actual_evapotranspiration_for_balance),
                     ("green_et",                              green_et),
                     ("blue_et",                               blue_et),
-                    ("deep_percolation",                      deep_percolation),
-                    ("irrigation",                            irrigation),
-                    ("soil_moisture",                         soil_moisture),
-                    ("runoff",                                runoff),
+                    ("actual_irrigation_input",               actual_irrigation_input),
+                    ("actual_deep_percolation",               deep_percolation),
+                    ("reported_iwr",                          irrigation),
+                    ("actual_soil_moisture",                  soil_moisture_actual),
+                    ("actual_runoff",                         runoff),
+                    ("reference_soil_moisture",               soil_moisture_reference),
+                    ("reference_pre_irrigation_storage",      reference_pre_irrigation_storage),
+                    ("reference_deep_percolation",            reference_deep_percolation),
+                    ("reference_runoff",                      reference_runoff),
                     ("cumulative_irrigation",                 cumulative_irrigation),
                 ]:
                     stats = array_stats(var_arr, nodata=nodata)
@@ -1723,15 +2090,29 @@ def run_iwr_model(
 
     if write_cumulative_iwr and output_folder is not None and output_profile is not None:
         cumulative_path = Path(output_folder) / "iwr_cumulative_total.tif"
-        write_daily_geotiff(
-            output_path=cumulative_path,
-            data=np.where(static_valid_mask, cumulative_irrigation, nodata).astype(np.float32),
-            profile=output_profile,
-            nodata=nodata,
-            metadata={
+
+        if iwr_mode == IWR_MODE_THEORETICAL_NET_IRRIGATION:
+            cumulative_metadata = {
+                "variable": "cumulative_theoretical_net_irrigation_requirement",
+                "units": "mm over cropped area",
+                "iwr_mode": iwr_mode,
+                "iwr_domain": iwr_domain,
+                "target_storage": theoretical_iwr_target,
+            }
+        else:
+            cumulative_metadata = {
                 "variable": "cumulative_blue_water_requirement",
                 "units": "mm over cropped/irrigated crop area",
-            },
+                "iwr_mode": iwr_mode,
+                "iwr_domain": iwr_domain,
+            }
+
+        write_daily_geotiff(
+            output_path=cumulative_path,
+            data=np.where(cumulative_static_mask, cumulative_irrigation, nodata).astype(np.float32),
+            profile=output_profile,
+            nodata=nodata,
+            metadata=cumulative_metadata,
         )
         print(f"Cumulative IWR written: {cumulative_path}")
 
@@ -1786,4 +2167,4 @@ def run_iwr_model(
             )
             print(f"Cumulative output written: {out_path}")
 
-    return soil_moisture, cumulative_irrigation
+    return soil_moisture_actual, cumulative_irrigation

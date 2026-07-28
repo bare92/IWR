@@ -2,6 +2,11 @@
   "start_date": "2021-01-01",
   "end_date": "2024-12-31",
 
+  "iwr_mode": "watneeds_blue_et",
+  "iwr_domain": "irrigated",
+  "theoretical_iwr_target": "stress_threshold",
+  "initial_soil_moisture_fraction": 0.5,
+
   "irrigated_areas_path": "/share/data/DAO/static/processed/distretti_irrigui_SIGRIAN_3035_1km_mask_aligned.tif",
   "valid_mask_path": "/share/data/DAO/static/processed/working_grid_3035_1km_precip_valid.tif",
   "soil_texture_path": "/share/data/DAO/static/processed/soil_texture_aligned.tif",

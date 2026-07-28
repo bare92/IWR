@@ -46,6 +46,10 @@
     "max_precipitation_mm_day": 350,
     "max_et0_mm_day": 20,
     "max_iwr_mm_day": 100,
-    "min_valid_forcing_fraction": 0.01
+    "min_valid_forcing_fraction": 0.01,
+    "iwr_mode": "watneeds_blue_et",
+    "iwr_domain": "irrigated",
+    "theoretical_iwr_target": "stress_threshold",
+    "initial_soil_moisture_fraction": 0.5
   }
 }

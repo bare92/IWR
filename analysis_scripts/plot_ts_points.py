@@ -119,7 +119,7 @@ DEFAULT_VARIABLES = {
 
 RUN_CONFIG = {
     # Required inputs
-    "points": "/share/data/DAO/auxiliary/shapefile_checks/point_check_crops.shp",  # e.g. "/path/to/points.shp"
+    "points": "/share/data/DAO/auxiliary/shapefile_checks/point_check_test1.shp",  # e.g. "/path/to/points.shp"
     "out_dir": str(MODEL_OUTPUT_ROOT / "IWR_plot_point_ts"),
 
     # Optional runtime controls

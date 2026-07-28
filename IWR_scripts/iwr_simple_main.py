@@ -16,7 +16,7 @@ import rasterio
 from soil_functions import create_soil_parameter_rasters
 from crop_functions import check_crop_raster_and_csv
 from phenology_functions import load_phenology_layers
-from iwr_model import run_iwr_model
+from iwr_model import normalize_iwr_configuration, run_iwr_model
 from checks import run_input_checks
 
 
@@ -96,12 +96,55 @@ def main(config_path=None):
         "%Y-%m-%d",
     )
 
-    irrigated_areas_path = Path(
-        _cfg_get(
-            config,
-            "datasets.static.irrigated_areas_path",
-            fallback_keys=("irrigated_areas_path",),
-        )
+    iwr_mode = _cfg_get(
+        config,
+        "options.iwr_mode",
+        fallback_keys=("iwr_mode",),
+        default="watneeds_blue_et",
+    )
+    iwr_domain = _cfg_get(
+        config,
+        "options.iwr_domain",
+        fallback_keys=("iwr_domain",),
+        default=None,
+    )
+    theoretical_iwr_target = _cfg_get(
+        config,
+        "options.theoretical_iwr_target",
+        fallback_keys=("theoretical_iwr_target",),
+        default="stress_threshold",
+    )
+    initial_soil_moisture_fraction = _cfg_get(
+        config,
+        "options.initial_soil_moisture_fraction",
+        fallback_keys=("initial_soil_moisture_fraction",),
+        default=0.5,
+    )
+
+    iwr_mode, iwr_domain, theoretical_iwr_target = normalize_iwr_configuration(
+        iwr_mode=iwr_mode,
+        iwr_domain=iwr_domain,
+        theoretical_iwr_target=theoretical_iwr_target,
+    )
+
+    print(
+        "Selected IWR configuration:",
+        f"mode={iwr_mode},",
+        f"domain={iwr_domain},",
+        f"target={theoretical_iwr_target},",
+        f"initial_soil_moisture_fraction={float(initial_soil_moisture_fraction):.3f}",
+    )
+
+    irrigated_areas_value = _cfg_get(
+        config,
+        "datasets.static.irrigated_areas_path",
+        fallback_keys=("irrigated_areas_path",),
+        default=None,
+    )
+    irrigated_areas_path = (
+        Path(irrigated_areas_value)
+        if irrigated_areas_value not in (None, "")
+        else None
     )
     valid_mask_path = Path(
         _cfg_get(config, "datasets.static.valid_mask_path", fallback_keys=("valid_mask_path",))
@@ -169,7 +212,12 @@ def main(config_path=None):
     iwr_output_folder = output_base / run_name
     debug_output_folder = str(output_base / f"{run_name}_debug")
 
-    irrigation_mask, irrigation_profile = read_raster(irrigated_areas_path)
+    if irrigated_areas_path is not None:
+        irrigation_mask, irrigation_profile = read_raster(irrigated_areas_path)
+    else:
+        irrigation_mask = None
+        irrigation_profile = None
+
     valid_area_mask, valid_area_profile = read_raster(valid_mask_path)
 
     crop_fraction_path = Path(
@@ -267,11 +315,19 @@ def main(config_path=None):
             fallback_keys=("debug_csv_frequency_days",),
             default=1,
         ),
+        iwr_mode=iwr_mode,
+        iwr_domain=iwr_domain,
+        theoretical_iwr_target=theoretical_iwr_target,
+        initial_soil_moisture_fraction=initial_soil_moisture_fraction,
     )
 
     print("Configuration loaded")
     print("Start date:", start_date)
     print("End date:", end_date)
+    print("IWR mode:", iwr_mode)
+    print("IWR domain:", iwr_domain)
+    print("Theoretical IWR target:", theoretical_iwr_target)
+    print("Initial soil moisture fraction:", initial_soil_moisture_fraction)
     print("Irrigated areas:", irrigated_areas_path)
     print("Valid mask:", valid_mask_path)
     print("Soil texture:", soil_texture_path)
@@ -296,4 +352,5 @@ def main(config_path=None):
 
 
 if __name__ == "__main__":
+    main()
     main()

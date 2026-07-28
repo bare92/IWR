@@ -31,13 +31,14 @@ import matplotlib.pyplot as plt
 # USER SETTINGS
 # =========================
 
-INPUT_DIR = Path("/share/data/DAO/output_eraLand/IWR")
-OUTPUT_DIR = Path("/share/data/DAO/output_eraLand/IWR_plots")
+# For rainfed theoretical IWR from config_eraL_theoretical_rainfed.json:
+INPUT_DIR = Path("/home/fremen/data/projects/Burkina/00_Data_iwr/iwr_output/IWR_theoretical_rainfed")
+OUTPUT_DIR = Path("/home/fremen/data/projects/Burkina/00_Data_iwr/iwr_plots")
 
 # Choose what to plot for annual totals:
 #   "volume_m3" = total water volume over the model domain
 #   "mean_mm"   = spatial mean depth
-ANNUAL_PLOT_MODE = "volume_m3"
+ANNUAL_PLOT_MODE = "mean_mm"
 
 # AIDA reference layers created with iwr_AIDA.py
 AIDA_IWR_MM_FILE = Path(
@@ -50,7 +51,15 @@ AIDA_IWR_VOLUME_FILE = Path(
     "aida_iwr_blue_volume_m3_yr.tif"
 )
 
-PLOT_AIDA_REFERENCE = True
+# Disable AIDA reference for rainfed theoretical analysis
+PLOT_AIDA_REFERENCE = False
+
+# Per-pixel cell area raster (m²). If provided, used for volume calculations instead of
+# assuming constant pixel area. Set to None to use constant pixel_area_m2() (metric CRS only).
+# Create this with: python scripts_additional/create_cell_area_raster.py <ref_raster> <output>
+AREA_M2_RASTER_FILE = Path(
+    "/home/fremen/data/projects/Burkina/00_Data_iwr/static/burkina_cell_area_m2.tif"
+)
 
 # Mask aligned to the model grid: 1 = inside SIGRIAN irrigated districts, 0/nodata = outside
 AIDA_MASK_FILE = Path(
@@ -112,6 +121,24 @@ def list_daily_files(prefix: str) -> dict:
     return out
 
 
+def load_area_raster() -> np.ndarray | None:
+    """
+    Load per-pixel area raster if configured.
+    Returns None if file doesn't exist or is not configured.
+    """
+    if AREA_M2_RASTER_FILE is None or not AREA_M2_RASTER_FILE.exists():
+        return None
+
+    print(f"Loading area raster: {AREA_M2_RASTER_FILE}")
+    with rasterio.open(AREA_M2_RASTER_FILE) as src:
+        arr = src.read(1).astype("float64")
+        if src.nodata is not None:
+            arr[arr == src.nodata] = np.nan
+        arr[~np.isfinite(arr)] = np.nan
+
+    return arr
+
+
 def pixel_area_m2(src: rasterio.io.DatasetReader) -> float:
     """
     Estimate pixel area.
@@ -122,11 +149,15 @@ def pixel_area_m2(src: rasterio.io.DatasetReader) -> float:
     return abs(transform.a * transform.e)
 
 
-def read_raster_stats(path: Path) -> dict:
+def read_raster_stats(path: Path, area_array: np.ndarray | None = None) -> dict:
     """
     Read one raster and return spatial mean and total volume.
 
     Assumes raster values are water depth in mm/day.
+    
+    If area_array is provided (per-pixel areas in m²), it is used for volume calculation.
+    Otherwise, assumes constant pixel area from CRS (metric CRS only).
+    
     Volume is calculated as:
         sum(mm) / 1000 * pixel_area_m2
     """
@@ -149,8 +180,22 @@ def read_raster_stats(path: Path) -> dict:
             total_volume_m3 = np.nan
         else:
             mean_mm = np.nanmean(arr)
-            area_m2 = pixel_area_m2(src)
-            total_volume_m3 = np.nansum(arr) / 1000.0 * area_m2
+            
+            # Calculate volume using per-pixel areas if available
+            if area_array is not None:
+                # Ensure area_array has same shape as arr
+                if area_array.shape != arr.shape:
+                    raise ValueError(
+                        f"Area array shape {area_array.shape} does not match "
+                        f"raster shape {arr.shape}"
+                    )
+                # Volume in m³: (mm/day) / 1000 * area_m2 for each pixel, then sum
+                pixel_volumes_m3 = (arr / 1000.0) * area_array
+                total_volume_m3 = np.nansum(pixel_volumes_m3)
+            else:
+                # Fallback: assume constant pixel area (metric CRS only)
+                area_m2 = pixel_area_m2(src)
+                total_volume_m3 = np.nansum(arr) / 1000.0 * area_m2
 
         crs = src.crs.to_string() if src.crs else "unknown"
 
@@ -180,7 +225,7 @@ def read_single_band_array(path: Path) -> np.ndarray:
     return arr
 
 
-def read_aida_reference_value() -> float | None:
+def read_aida_reference_value(area_array: np.ndarray | None = None) -> float | None:
     """
     Read the masked AIDA reference value for the annual IWR plot.
 
@@ -196,6 +241,7 @@ def read_aida_reference_value() -> float | None:
 
         If ANNUAL_PLOT_MODE == "volume_m3":
         returns masked AIDA blue-water IWR [million m3/year]
+        If per-pixel areas are provided, those are used; otherwise constant pixel area is assumed.
 
     If ANNUAL_PLOT_MODE == "mean_mm":
         returns masked spatial mean AIDA blue-water IWR [mm/year]
@@ -286,10 +332,20 @@ def read_aida_reference_value() -> float | None:
             return float(np.nanmean(aida_masked))
 
         elif ANNUAL_PLOT_MODE == "volume_m3":
-            # Convert masked AIDA depth to volume:
-            # mm/year / 1000 * pixel_area_m2 = m3/year
-            area_m2 = pixel_area_m2(aida_src)
-            volume_m3 = np.nansum(aida_masked) / 1000.0 * area_m2
+            # Convert masked AIDA depth to volume using per-pixel areas if available
+            if area_array is not None:
+                if area_array.shape != aida_masked.shape:
+                    raise ValueError(
+                        f"Area array shape {area_array.shape} does not match "
+                        f"AIDA shape {aida_masked.shape}"
+                    )
+                # Volume in m³: (mm/year) / 1000 * area_m2 for each pixel, then sum
+                pixel_volumes_m3 = (aida_masked / 1000.0) * area_array
+                volume_m3 = np.nansum(pixel_volumes_m3)
+            else:
+                # Fallback: assume constant pixel area (metric CRS only)
+                area_m2 = pixel_area_m2(aida_src)
+                volume_m3 = np.nansum(aida_masked) / 1000.0 * area_m2
 
             # Convert to million m3/year, matching your bar plot
             return float(volume_m3 / 1e6)
@@ -299,6 +355,8 @@ def read_aida_reference_value() -> float | None:
 
 
 def build_timeseries() -> pd.DataFrame:
+    area_array = load_area_raster()
+    
     iwr_files = list_daily_files("iwr")
     blue_files = list_daily_files("blue_et")
     green_files = list_daily_files("green_et")
@@ -316,6 +374,10 @@ def build_timeseries() -> pd.DataFrame:
     print(f"Found {len(blue_files)} blue ET files")
     print(f"Found {len(green_files)} green ET files")
     print(f"Processing {len(all_dates)} dates")
+    if area_array is not None:
+        print(f"Using per-pixel area raster for volume calculations")
+    else:
+        print(f"Using constant pixel area for volume calculations (metric CRS assumed)")
 
     for i, date in enumerate(all_dates, start=1):
         print(f"[{i}/{len(all_dates)}] {date.date()}")
@@ -323,7 +385,7 @@ def build_timeseries() -> pd.DataFrame:
         row = {"date": date}
 
         if date in iwr_files:
-            stats = read_raster_stats(iwr_files[date])
+            stats = read_raster_stats(iwr_files[date], area_array)
             row["iwr_mean_mm"] = stats["mean_mm"]
             row["iwr_volume_m3"] = stats["volume_m3"]
             row["valid_pixels"] = stats["valid_pixels"]
@@ -333,7 +395,7 @@ def build_timeseries() -> pd.DataFrame:
             row["iwr_volume_m3"] = np.nan
 
         if date in blue_files:
-            stats = read_raster_stats(blue_files[date])
+            stats = read_raster_stats(blue_files[date], area_array)
             row["blue_mean_mm"] = stats["mean_mm"]
             row["blue_volume_m3"] = stats["volume_m3"]
         else:
@@ -341,7 +403,7 @@ def build_timeseries() -> pd.DataFrame:
             row["blue_volume_m3"] = np.nan
 
         if date in green_files:
-            stats = read_raster_stats(green_files[date])
+            stats = read_raster_stats(green_files[date], area_array)
             row["green_mean_mm"] = stats["mean_mm"]
             row["green_volume_m3"] = stats["volume_m3"]
         else:
@@ -422,12 +484,12 @@ def annual_figure_size(number_of_years):
     return width, ANNUAL_FIGURE_HEIGHT
 
 
-def save_yearly_iwr_plot(df: pd.DataFrame):
+def save_yearly_iwr_plot(df: pd.DataFrame, area_array: np.ndarray | None = None):
     """
     Annual model IWR bar plot with AIDA reference line.
     """
 
-    aida_value = read_aida_reference_value()
+    aida_value = read_aida_reference_value(area_array)
 
     if ANNUAL_PLOT_MODE == "volume_m3":
         annual = df.groupby("year", as_index=False)["iwr_volume_m3"].sum()
@@ -562,6 +624,9 @@ def save_yearly_blue_green_plot(df: pd.DataFrame):
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Load area raster once at startup
+    area_array = load_area_raster()
+
     df = build_timeseries()
 
     if df.empty:
@@ -574,14 +639,16 @@ def main():
     crs_values = df["crs"].dropna().unique() if "crs" in df.columns else []
     if len(crs_values) > 0:
         print(f"Detected CRS: {crs_values[0]}")
-        if "4326" in crs_values[0] or "longlat" in crs_values[0].lower():
-            print(
-                "WARNING: CRS appears geographic. Volume estimates may be wrong. "
-                "Use mean_mm plots or reproject rasters to a metric CRS first."
-            )
+        if area_array is None:
+            if "4326" in crs_values[0] or "longlat" in crs_values[0].lower():
+                print(
+                    "WARNING: CRS appears geographic and no area raster provided. "
+                    "Volume estimates may be wrong. "
+                    "Use mean_mm plots or provide AREA_M2_RASTER_FILE."
+                )
 
     save_daily_iwr_plot(df)
-    save_yearly_iwr_plot(df)
+    save_yearly_iwr_plot(df, area_array)
     save_daily_blue_green_plot(df)
     save_yearly_blue_green_plot(df)
 
