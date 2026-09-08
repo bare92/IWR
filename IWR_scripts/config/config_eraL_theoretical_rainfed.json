@@ -1,6 +1,8 @@
 {
   "time": {
-    "start_date": "1991-01-01",
+
+    "spinup_start_date": "1991-01-01",
+    "start_date": "1993-01-01",
     "end_date": "2026-04-30"
   },
 
@@ -21,8 +23,8 @@
         "phenosen2": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/phenosen2_v04_aligned.tif"
       },
       "crop": {
-        "crop_fraction_path": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/crop_percentages_burkina.tif",
-        "crop_parameters_csv": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/crop_parameters_burkina.csv"
+        "crop_fraction_path": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/CROPG_fractional.tif",
+        "crop_parameters_csv": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/CROPG_fractional.csv"
       }
     },
 
@@ -34,22 +36,20 @@
 
   "outputs": {
     "soil_output_folder": "/home/fremen/data/projects/Burkina/00_Data_iwr/static/processed/soil_parameters",
-    "output_base": "/home/fremen/data/projects/Burkina/00_Data_iwr/iwr_output",
+    "output_base": "/home/fremen/data/projects/Burkina/00_Data_iwr/iwr_output_260903",
     "run_name": "IWR_theoretical_rainfed"
   },
 
   "options": {
-    "strict_checks": false,
-    "write_debug_csv": false,
-    "write_cumulative_iwr": true,
-    "debug_mode": false,
-    "max_precipitation_mm_day": 350,
-    "max_et0_mm_day": 20,
-    "max_iwr_mm_day": 100,
-    "min_valid_forcing_fraction": 0.01,
     "iwr_mode": "theoretical_net_irrigation",
     "iwr_domain": "all_cropped",
     "theoretical_iwr_target": "stress_threshold",
-    "initial_soil_moisture_fraction": 0.5
-  }
+    "drainage_scheme": "fao56_excess_above_field_capacity",
+    "offseason_water_balance_kc": 0.5,
+    "initial_soil_moisture_fraction": 0.5,
+    "force_regenerate_soil_parameters": true,
+    "write_daily_etx": true,
+    "write_daily_eta_stress": true,
+    "debug_mode": true
+}
 }

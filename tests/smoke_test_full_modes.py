@@ -184,7 +184,7 @@ def test_legacy_mode_smoke():
             valid_mask=valid_area_pixels,
         )
 
-        daily_tif = out_dir / "iwr_20210101.tif"
+        daily_tif = out_dir / "IWR" / "iwr_20210101.tif"
         with rasterio.open(daily_tif) as src:
             produced = src.read(1)
 

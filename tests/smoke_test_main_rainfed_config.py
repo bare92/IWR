@@ -129,7 +129,7 @@ def test_main_with_null_irrigation_path():
 
         main(str(cfg_path))
 
-        daily_output = output_base / "IWR_theoretical_test" / "iwr_20210101.tif"
+        daily_output = output_base / "IWR_theoretical_test" / "IWR" / "iwr_20210101.tif"
         assert daily_output.exists(), "Expected daily IWR output GeoTIFF to be written"
 
         with rasterio.open(daily_output) as src:

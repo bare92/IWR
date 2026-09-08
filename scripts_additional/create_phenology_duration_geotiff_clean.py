@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import argparse
 import calendar
 import json
 from datetime import datetime
@@ -11,6 +10,15 @@ import rasterio
 
 
 NODATA = 65535
+
+# =========================
+# USER INPUTS
+# =========================
+# Set inputs here when running this script directly (no CLI arguments needed).
+CONFIG_PATH = Path("IWR_scripts/config/config_eraL_theoretical_rainfed.json")
+OUTPUT_PATH = Path("/home/fremen/data/projects/Burkina/00_Data_iwr/static/pheno_days_2024.tif")
+# Use None to derive the year from the config start date.
+REFERENCE_YEAR = 2024
 
 REQUIRED_KEYS = (
     "phenos1",
@@ -29,13 +37,23 @@ def read_config(path):
     with open(path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    paths = config["phenology_paths"]
+    # Support both legacy flat configs and nested model configs.
+    if "phenology_paths" in config:
+        paths = config["phenology_paths"]
+    else:
+        paths = config["datasets"]["static"]["phenology_paths"]
 
     missing = [key for key in REQUIRED_KEYS if key not in paths]
     if missing:
         raise KeyError(f"Missing phenology paths: {', '.join(missing)}")
 
     return config, {key: Path(paths[key]) for key in REQUIRED_KEYS}
+
+
+def config_start_date(config):
+    if "start_date" in config:
+        return config["start_date"]
+    return config["time"]["start_date"]
 
 
 def read_layers(paths):
@@ -234,35 +252,17 @@ def write_geotiff(path, profile, growing, maximum, senescence, active, year):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("config.json"),
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
-    )
-    parser.add_argument(
-        "--reference-year",
-        type=int,
-        default=None,
-    )
-    args = parser.parse_args()
+    config, paths = read_config(CONFIG_PATH)
 
-    config, paths = read_config(args.config)
-
-    if args.reference_year is not None:
-        year = args.reference_year
+    if REFERENCE_YEAR is not None:
+        year = REFERENCE_YEAR
     else:
         year = datetime.strptime(
-            config["start_date"],
+            config_start_date(config),
             "%Y-%m-%d",
         ).year
 
-    output = args.output
+    output = OUTPUT_PATH
     if output is None:
         output = (
             paths["phenonseasons"].parent

@@ -40,7 +40,11 @@ REFERENCE_MAP = Path("/home/fremen/data/projects/Burkina/00_Data_iwr/static/burk
 # ]
 INPUT_GEOTIFFS = [
     Path(p) for p in
-      glob.glob("/home/fremen/data/basedata/WORLD/ASAP_pheno/pheno*.tif")]  # Example: align all .tif files in a folder
+      glob.glob("/home/fremen/data/basedata/WORLD/ASAP_pheno/pheno*.tif")]  
+
+INPUT_GEOTIFFS = [
+    Path(p) for p in
+      glob.glob("/home/fremen/data/basedata/WORLD/ASAP_pheno/pheno*.tif")] 
 
 # Folder where aligned rasters will be written.
 OUTPUT_FOLDER = Path("/home/fremen/data/projects/Burkina/00_Data_iwr/static")

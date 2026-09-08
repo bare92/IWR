@@ -39,9 +39,12 @@
   },
 
   "options": {
+    "force_regenerate_soil_parameters": false,
     "strict_checks": false,
     "write_debug_csv": false,
     "write_cumulative_iwr": true,
+    "write_daily_etx": false,
+    "write_daily_eta_stress": false,
     "debug_mode": false,
     "max_precipitation_mm_day": 350,
     "max_et0_mm_day": 20,
